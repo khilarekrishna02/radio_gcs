@@ -1,0 +1,4 @@
+Flask>=3.0,<4.0
+pyserial>=3.5
+pymavlink>=2.4.40
+Shapely>=2.0

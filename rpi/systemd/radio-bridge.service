@@ -1,0 +1,21 @@
+# Alternative service name for the same combined process. Enable EITHER this
+# unit OR drone-gcs.service, never both: flask_app.py owns the radio serial port
+# and starts radio_bridge.py as a thread in the same process.
+[Unit]
+Description=Drone GCS Pi Radio Bridge (combined process)
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/drone-radio-gcs/rpi
+Environment=GCS_RADIO_PORT=/dev/ttyUSB0
+Environment=GCS_RADIO_BAUD=57600
+Environment=PIXHAWK_PORT=/dev/ttyACM0
+Environment=PIXHAWK_BAUD=115200
+ExecStart=/opt/drone-radio-gcs/.venv/bin/python flask_app.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

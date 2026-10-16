@@ -1,0 +1,16 @@
+[Unit]
+Description=Drone Radio GCS Laptop Web UI
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/drone-radio-gcs/laptop
+Environment=GCS_RADIO_PORT=/dev/ttyUSB0
+Environment=GCS_RADIO_BAUD=57600
+Environment=GCS_WEB_HOST=127.0.0.1
+ExecStart=/opt/drone-radio-gcs/.venv/bin/python api_proxy.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
