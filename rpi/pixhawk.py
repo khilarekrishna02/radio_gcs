@@ -109,6 +109,16 @@ class PixhawkController:
             clear_ack = master.recv_match(type="MISSION_ACK", blocking=True, timeout=5)
             if clear_ack is not None and clear_ack.type not in (mavutil.mavlink.MAV_MISSION_ACCEPTED, 0):
                 raise RuntimeError(f"Pixhawk rejected mission clear (ACK {clear_ack.type})")
+
+            print("MISSION ITEMS BEING UPLOADED:")
+            for i, item in enumerate(items):
+                print(
+                        i,
+                        "command =", item["command"],
+                        "frame =", item["frame"],
+                        "alt =", item["z"]
+                    )
+                        
             master.mav.mission_count_send(master.target_system, master.target_component, total)
             sent = set()
             deadline = time.monotonic() + 90
@@ -154,16 +164,21 @@ class PixhawkController:
         raise TimeoutError(f"Pixhawk did not confirm {expected} mode")
 
     def arm_vehicle(self):
-        """Request arming and wait for the Pixhawk heartbeat to confirm it."""
+        """Request arming, report MAVLink ACK/status text, and verify heartbeat state."""
         self.ensure_connected()
         master = self.master
+
         with self.lock:
             if master.motors_armed():
                 self.telemetry["armed"] = "ARMED"
                 return {"armed": True, "status": "ALREADY_ARMED"}
+
+            # Use the autopilot target learned from its heartbeat.
+            target_system = master.target_system
+            target_component = master.target_component
             master.mav.command_long_send(
-                master.target_system,
-                master.target_component,
+                target_system,
+                target_component,
                 mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
                 0,
                 1,  # param1: arm
@@ -171,17 +186,52 @@ class PixhawkController:
             )
 
         deadline = time.monotonic() + 10
+        last_status_text = None
+        ack_received = False
+
         while time.monotonic() < deadline:
             with self.lock:
-                master.recv_match(type="HEARTBEAT", blocking=True, timeout=1)
+                msg = master.recv_match(
+                    type=["HEARTBEAT", "COMMAND_ACK", "STATUSTEXT"],
+                    blocking=True,
+                    timeout=1,
+                )
                 armed = master.motors_armed()
+
+            if msg is not None:
+                kind = msg.get_type()
+                if kind == "STATUSTEXT":
+                    last_status_text = str(msg.text).strip("\x00")
+                    self.telemetry["status"] = last_status_text
+                    print(f"Pixhawk STATUSTEXT: {last_status_text}")
+                elif kind == "COMMAND_ACK" and msg.command == mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM:
+                    ack_received = True
+                    print(f"Pixhawk ARM COMMAND_ACK: {msg.to_dict()}")
+                    if msg.result not in (
+                        mavutil.mavlink.MAV_RESULT_ACCEPTED,
+                        mavutil.mavlink.MAV_RESULT_IN_PROGRESS,
+                    ):
+                        detail = f"Pixhawk rejected ARM command (result={msg.result})"
+                        if last_status_text:
+                            detail += f": {last_status_text}"
+                        raise RuntimeError(detail)
+
             if armed:
                 self.telemetry["armed"] = "ARMED"
-                return {"armed": True, "status": "ARMED"}
-        raise TimeoutError(
-            "Pixhawk did not confirm arming within 10 seconds. "
-            "Check STATUSTEXT and pre-arm checks."
-        )
+                self.telemetry["status"] = "ARMED"
+                return {
+                    "armed": True,
+                    "status": "ARMED",
+                    "command_ack_received": ack_received,
+                    "statustext": last_status_text,
+                }
+
+        detail = "Pixhawk did not confirm arming within 10 seconds."
+        if last_status_text:
+            detail += f" Last STATUSTEXT: {last_status_text}"
+        if not ack_received:
+            detail += " No ARM COMMAND_ACK was received."
+        raise TimeoutError(detail)
 
     def start_mission(self):
         self.ensure_connected()
@@ -196,18 +246,7 @@ class PixhawkController:
                 raise RuntimeError("GUIDED/AUTO modes are not available in the current firmware")
             master.mav.set_mode_send(master.target_system, mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, modes["GUIDED"])
         self._wait_mode("GUIDED")
-        with self.lock:
-            master.mav.command_long_send(master.target_system, master.target_component,
-                mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0, 1, 0, 0, 0, 0, 0, 0)
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            with self.lock:
-                master.recv_match(type="HEARTBEAT", blocking=True, timeout=1)
-                armed = master.motors_armed()
-            if armed:
-                break
-        else:
-            raise TimeoutError("Pixhawk did not confirm armed state")
+        self.arm_vehicle()
         with self.lock:
             master.mav.set_mode_send(master.target_system, mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, modes["AUTO"])
         self._wait_mode("AUTO")
