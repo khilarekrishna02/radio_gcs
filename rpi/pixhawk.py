@@ -103,6 +103,37 @@ class PixhawkController:
     def _mission_type_kwargs(self):
         return {"mission_type": mavutil.mavlink.MAV_MISSION_TYPE_MISSION}
 
+    @staticmethod
+    def _command_uses_global_position(command):
+        """Return whether a mission command's x/y/z fields are geographic position."""
+        # NAV commands whose x/y fields describe a location. Non-positional commands
+        # such as DO_CHANGE_SPEED and RTL may be normalized to frame 0 by ArduPilot.
+        return int(command) in {
+            16,  # MAV_CMD_NAV_WAYPOINT
+            17,  # MAV_CMD_NAV_LOITER_UNLIM
+            18,  # MAV_CMD_NAV_LOITER_TURNS
+            19,  # MAV_CMD_NAV_LOITER_TIME
+            21,  # MAV_CMD_NAV_LAND
+            22,  # MAV_CMD_NAV_TAKEOFF
+            82,  # MAV_CMD_NAV_SPLINE_WAYPOINT
+            84,  # MAV_CMD_NAV_LOITER_TO_ALT
+            85,  # MAV_CMD_NAV_GUIDED_ENABLE (x/y not geographic in all implementations; handled conservatively)
+            189, # MAV_CMD_DO_LAND_START (frame may be relevant on some firmwares)
+        }
+
+    @staticmethod
+    def _int_frame_for_item(frame, command):
+        """Use INT-specific global frame IDs for position-bearing MISSION_ITEM_INT."""
+        frame = int(frame)
+        if not PixhawkController._command_uses_global_position(command):
+            return frame
+        mapping = {
+            mavutil.mavlink.MAV_FRAME_GLOBAL: mavutil.mavlink.MAV_FRAME_GLOBAL_INT,
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT: mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+            mavutil.mavlink.MAV_FRAME_GLOBAL_TERRAIN_ALT: mavutil.mavlink.MAV_FRAME_GLOBAL_TERRAIN_ALT_INT,
+        }
+        return int(mapping.get(frame, frame))
+
     def _readback_mission_locked(self, timeout=8):
         """Download mission from autopilot while caller holds self.lock."""
         master = self.master
@@ -210,9 +241,10 @@ class PixhawkController:
                     raise RuntimeError(f"Pixhawk requested invalid mission sequence {seq}")
                 item = items[seq]
                 if msg_type == "MISSION_REQUEST_INT":
+                    wire_frame = self._int_frame_for_item(item["frame"], item["command"])
                     master.mav.mission_item_int_send(
                         target_system, target_component, seq,
-                        item["frame"], item["command"], item["current"], item["autocontinue"],
+                        wire_frame, item["command"], item["current"], item["autocontinue"],
                         item["param1"], item["param2"], item["param3"], item["param4"],
                         item["x"], item["y"], item["z"],
                         mission_type=mavutil.mavlink.MAV_MISSION_TYPE_MISSION
@@ -255,12 +287,24 @@ class PixhawkController:
                     mismatches.append(
                         f"seq {seq} command expected {expected['command']} got {actual.command}"
                     )
-                # Frame values may be normalized by firmware, so command sequence is
-                # the primary integrity check; report frame differences as well.
-                if int(actual.frame) != int(expected["frame"]):
-                    mismatches.append(
-                        f"seq {seq} frame expected {expected['frame']} got {actual.frame}"
-                    )
+                # ArduPilot may normalize frames for non-positional commands (for
+                # example DO_CHANGE_SPEED and RTL) because their x/y fields are not
+                # geographic coordinates. Only verify frames for position-bearing
+                # NAV commands, treating WPL frames 0/3/10 as equivalent to their
+                # MISSION_ITEM_INT variants 5/6/11.
+                if self._command_uses_global_position(expected["command"]):
+                    expected_frame = int(expected["frame"])
+                    actual_frame = int(actual.frame)
+                    int_frame_to_wpl = {
+                        int(mavutil.mavlink.MAV_FRAME_GLOBAL_INT): int(mavutil.mavlink.MAV_FRAME_GLOBAL),
+                        int(mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT): int(mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT),
+                        int(mavutil.mavlink.MAV_FRAME_GLOBAL_TERRAIN_ALT_INT): int(mavutil.mavlink.MAV_FRAME_GLOBAL_TERRAIN_ALT),
+                    }
+                    normalized_actual = int_frame_to_wpl.get(actual_frame, actual_frame)
+                    if normalized_actual != expected_frame:
+                        mismatches.append(
+                            f"seq {seq} frame expected {expected_frame} got {actual_frame}"
+                        )
             if mismatches:
                 raise RuntimeError(
                     "Pixhawk ACKed the upload but stored mission differs from the file: "
