@@ -139,6 +139,12 @@ class PixhawkController:
                 if not 0 <= seq < total:
                     raise RuntimeError(f"Pixhawk requested invalid mission sequence {seq}")
                 item = items[seq]
+                print(
+                    f"[MISSION REQUEST] type={typ}, seq={seq}, "
+                    f"command={item['command']}, frame={item['frame']}, "
+                    f"current={item['current']}, autocontinue={item['autocontinue']}, "
+                    f"alt={item['z']}"
+                )
                 if typ == "MISSION_REQUEST_INT":
                     master.mav.mission_item_int_send(master.target_system, master.target_component, seq,
                         item["frame"], item["command"], item["current"], item["autocontinue"],
@@ -149,6 +155,7 @@ class PixhawkController:
                         item["frame"], item["command"], item["current"], item["autocontinue"],
                         item["param1"], item["param2"], item["param3"], item["param4"],
                         item["x"] / 1e7, item["y"] / 1e7, item["z"])
+                print(f"[MISSION SENT] seq={seq}, command={item['command']}")
                 sent.add(seq)
                 if progress: progress(f"Uploading mission item {seq + 1}/{total}", len(sent), total)
             raise TimeoutError(f"Mission upload timed out; sent {len(sent)}/{total} items")
