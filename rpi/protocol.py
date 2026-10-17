@@ -20,25 +20,42 @@ def decode_message(line):
 
 
 def parse_qgc_wpl(text):
+    """Parse QGC WPL rows using the same semantics as the verified standalone uploader.
+
+    Every row is retained (including the WPL home/reference row), sequence numbers
+    are preserved, and coordinates are represented as integer degrees * 1e7 for
+    MISSION_ITEM_INT. This intentionally mirrors upload_waypoints.py.
+    """
     lines = text.splitlines()
     if not lines or not lines[0].strip().startswith("QGC WPL"):
         raise ValueError("Invalid QGC WPL file header")
     items = []
-    for line in lines[1:]:
-        line = line.strip()
-        if not line:
+    for line_no, line in enumerate(lines[1:], start=2):
+        if not line.strip():
             continue
-        parts = line.split()
+        parts = line.strip().split()
         if len(parts) != 12:
-            raise ValueError(f"Invalid waypoint row: {line}")
+            raise ValueError(f"Line {line_no}: expected 12 fields, found {len(parts)}")
         seq, current, frame, command = map(int, parts[:4])
-        if seq == 0 and current == 1 and command == 16:
-            continue
-        items.append({"seq": len(items), "current": 0, "frame": frame, "command": command,
-                      "param1": float(parts[4]), "param2": float(parts[5]), "param3": float(parts[6]),
-                      "param4": float(parts[7]), "x": round(float(parts[8]) * 1e7),
-                      "y": round(float(parts[9]) * 1e7), "z": float(parts[10]),
-                      "autocontinue": int(parts[11])})
+        items.append({
+            "seq": seq,
+            "current": current,
+            "frame": frame,
+            "command": command,
+            "param1": float(parts[4]),
+            "param2": float(parts[5]),
+            "param3": float(parts[6]),
+            "param4": float(parts[7]),
+            "x": int(round(float(parts[8]) * 1e7)),
+            "y": int(round(float(parts[9]) * 1e7)),
+            "z": float(parts[10]),
+            "autocontinue": int(parts[11]),
+        })
     if not items:
         raise ValueError("No mission items found in QGC WPL file")
+    for index, item in enumerate(items):
+        if item["seq"] != index:
+            raise ValueError(
+                f"Non-contiguous WPL sequence: row index {index}, file sequence {item['seq']}"
+            )
     return items
