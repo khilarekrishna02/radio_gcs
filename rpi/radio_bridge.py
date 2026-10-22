@@ -164,6 +164,11 @@ class RadioBridge:
                 raise PermissionError("Operator confirmation is required")
             result = self.pixhawk.arm_vehicle()
             return result, "Pixhawk armed and heartbeat state confirmed"
+        if kind == "DISARM_REQUEST":
+            if p.get("operator_confirmed") is not True:
+                raise PermissionError("Operator confirmation is required")
+            result = self.pixhawk.disarm_vehicle()
+            return result, "Pixhawk disarmed and heartbeat state confirmed"
         if kind == "START_REQUEST":
             if p.get("operator_confirmed") is not True:
                 raise PermissionError("Operator confirmation is required")

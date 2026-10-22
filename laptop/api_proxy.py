@@ -146,6 +146,20 @@ def arm():
         return jsonify({"error": str(exc)}), 502
 
 
+@app.post("/api/disarm")
+def disarm():
+    """Request normal Pixhawk disarming and wait for state confirmation."""
+    try:
+        ensure_radio()
+        result = bridge.request("DISARM_REQUEST", {"operator_confirmed": True}, timeout=15)
+        data = result.get("data", {})
+        return jsonify({"ok": True,
+                        "message": result.get("message", "Pixhawk disarm command acknowledged."),
+                        "data": data})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
 @app.post("/api/ping")
 def ping():
     try:

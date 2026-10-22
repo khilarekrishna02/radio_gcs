@@ -8,7 +8,7 @@ This is a modular integration of the existing lawnmower workflow into the larger
 
 - The laptop generates a QGC WPL 110 `.waypoints` file.
 - The file is transferred in base64 JSON chunks using stop-and-wait acknowledgements. The Pi verifies byte count and SHA-256 before accepting it.
-- Clicking **Upload mission** sends `UPLOAD_REQUEST`; the Pi parses the received WPL file, uploads it to Pixhawk, and only reports success after a final accepted `MISSION_ACK` and a readback check confirms the stored item count, commands, and frames match the file.
+- Clicking **Upload mission** sends `UPLOAD_REQUEST`; the Pi parses the received WPL file, uploads each item when requested by Pixhawk, and reports success after the final accepted `MISSION_ACK`. It intentionally does not download and compare the mission afterward. The upload response lists command IDs and reports whether TAKEOFF command `22` was included.
 - Clicking **Start mission** requires a browser confirmation and successful upload. The Pi checks connection/GPS, requests GUIDED, confirms mode, arms and confirms armed state, requests AUTO and confirms mode, then sends MISSION_START. The existing mission items (including TAKEOFF and RTL) are not rewritten.
 - Telemetry retains `lat`, `lon`, `alt`, `mode`, `status`, `groundspeed`, `lidar_reading`, and `armed`. It is forwarded approximately once per second; it can pause briefly while Pixhawk mission protocol traffic owns the MAVLink receive lock.
 
@@ -84,8 +84,9 @@ Do not enable both Pi service unit names.
 1. Upload KML polygon and click **Generate waypoints**.
 2. Inspect/download the `.waypoints` file. Check the generated mission and altitude in a safe offline viewer or SITL.
 3. Click **Send to Pi**. The UI waits for Pi-side checksum verification.
-4. Click **Upload mission** and confirm. The UI waits for Pixhawk acknowledgement and verifies the stored mission by downloading it back.
-5. Verify actual aircraft state, GPS, battery, geofence, flight area, and failsafes. Click **Start mission** and explicitly confirm.
+4. Click **Upload mission** and confirm. The UI waits for Pixhawk's final accepted `MISSION_ACK`; no post-upload readback comparison blocks the workflow. Check the upload response/log for `takeoff_present: true` and command `22`.
+5. The **ARM** button arms without starting the mission. The **DISARM** button requests normal disarming and waits for heartbeat confirmation. DISARM is not force-disarm and must only be used after landing or during secured bench testing; do not disarm in flight.
+6. Verify aircraft state, GPS/EKF quality, battery, geofence, flight area, failsafes, and the generated path. Click **Start mission** and explicitly confirm.
 
 ## Tests (no hardware required)
 
@@ -101,6 +102,6 @@ python -m unittest discover -s tests -v
 - The radio protocol uses checksums for file integrity, but it is not encrypted or authenticated. Anyone with compatible access to the link could potentially inject messages; operate in a controlled test environment.
 - The current file-transfer protocol uses stop-and-wait acknowledgements with bounded request retries and request-ID response caching. Verify retry behavior during radio bench testing before relying on it in flight.
 - Mission generation uses a local tangent-plane approximation and Shapely intersections. Inspect the path around concave polygons and narrow regions. The current generator uses a single outer KML polygon ring; holes/multiple polygons are not handled.
-- The generated mission includes TAKEOFF and RTL because those commands are part of the existing generator. Upload keeps the WPL home/reference row and sequence values exactly as the verified standalone uploader does; always inspect the returned readback verification result. Start sequence does not insert or alter mission items.
+- The generated mission includes TAKEOFF and RTL because those commands are part of the existing generator. Upload preserves the WPL home/reference row and sequence values as the standalone uploader did. Upload acceptance means Pixhawk accepted the MAVLink upload transaction; it is not a physical flight test or proof that every mission item will execute as intended. Inspect the generated waypoint file and test in SITL before flight. Start sequence does not insert or alter mission items.
 - The Pi checks that a GPS position exists, but the operator must independently verify GPS quality, EKF status, altitude, and safety requirements before flight.
 - SiK radios are not a video link; only low-bandwidth telemetry/status and framed mission-file data are sent.

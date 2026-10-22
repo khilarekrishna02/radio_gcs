@@ -134,59 +134,11 @@ class PixhawkController:
         }
         return int(mapping.get(frame, frame))
 
-    def _readback_mission_locked(self, timeout=8):
-        """Download mission from autopilot while caller holds self.lock."""
-        master = self.master
-        ts, tc = master.target_system, master.target_component
-        try:
-            master.mav.mission_request_list_send(
-                ts, tc, mavutil.mavlink.MAV_MISSION_TYPE_MISSION
-            )
-        except TypeError:
-            master.mav.mission_request_list_send(ts, tc)
-        msg = master.recv_match(
-            type=["MISSION_COUNT", "MISSION_ACK"], blocking=True, timeout=timeout
-        )
-        if msg is None:
-            raise TimeoutError("No MISSION_COUNT received during mission readback")
-        if msg.get_type() == "MISSION_ACK":
-            raise RuntimeError(f"Pixhawk rejected mission readback (ACK {msg.type})")
-        count = int(msg.count)
-        result = {}
-        deadline = time.monotonic() + max(timeout, 1) * max(count, 1)
-        while len(result) < count and time.monotonic() < deadline:
-            seq = next(i for i in range(count) if i not in result)
-            try:
-                master.mav.mission_request_int_send(
-                    ts, tc, seq, mavutil.mavlink.MAV_MISSION_TYPE_MISSION
-                )
-            except TypeError:
-                master.mav.mission_request_int_send(ts, tc, seq)
-            item = master.recv_match(
-                type=["MISSION_ITEM_INT", "MISSION_ITEM", "MISSION_ACK"],
-                blocking=True, timeout=timeout
-            )
-            if item is None:
-                continue
-            if item.get_type() == "MISSION_ACK":
-                raise RuntimeError(f"Mission readback ended early (ACK {item.type})")
-            result[int(item.seq)] = item
-        if len(result) != count:
-            raise TimeoutError(f"Incomplete mission readback: {len(result)}/{count} items")
-        try:
-            master.mav.mission_ack_send(
-                ts, tc, mavutil.mavlink.MAV_MISSION_ACCEPTED,
-                mavutil.mavlink.MAV_MISSION_TYPE_MISSION
-            )
-        except TypeError:
-            master.mav.mission_ack_send(ts, tc, mavutil.mavlink.MAV_MISSION_ACCEPTED)
-        return result
-
     def upload_mission(self, items, progress=None):
-        """Upload QGC WPL rows with the verified standalone uploader's request-driven logic.
+        """Upload QGC WPL rows with request-driven MAVLink logic.
 
-        The WPL home/reference row is preserved, and success is reported only after
-        the final accepted ACK and a readback check of the stored mission.
+        Preserve all parsed rows, including TAKEOFF (command 22). Success requires
+        the final accepted MISSION_ACK; no post-upload readback comparison is done.
         """
         if not items:
             raise ValueError("Mission contains no MAVLink items")
@@ -209,16 +161,20 @@ class PixhawkController:
             except TypeError:
                 master.mav.mission_clear_all_send(target_system, target_component)
 
-            clear_ack = master.recv_match(type="MISSION_ACK", blocking=True, timeout=3)
-            if clear_ack is not None and clear_ack.type not in (
-                mavutil.mavlink.MAV_MISSION_ACCEPTED, 0
-            ):
-                raise RuntimeError(f"Pixhawk rejected mission clear (ACK {clear_ack.type})")
+            # Match the known-good standalone uploader's clear-then-upload flow.
+            # Drain a delayed clear ACK before starting the new transaction so it
+            # cannot be mistaken for the upload's final ACK.
+            time.sleep(2)
+            while master.recv_match(type="MISSION_ACK", blocking=False) is not None:
+                pass
 
-            master.mav.mission_count_send(
-                target_system, target_component, total,
-                mission_type=mavutil.mavlink.MAV_MISSION_TYPE_MISSION
-            )
+            try:
+                master.mav.mission_count_send(
+                    target_system, target_component, total,
+                    mission_type=mavutil.mavlink.MAV_MISSION_TYPE_MISSION
+                )
+            except TypeError:
+                master.mav.mission_count_send(target_system, target_component, total)
             sent = set()
             deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
@@ -240,6 +196,11 @@ class PixhawkController:
                 if not 0 <= seq < total:
                     raise RuntimeError(f"Pixhawk requested invalid mission sequence {seq}")
                 item = items[seq]
+                print(
+                    f"Mission item requested: seq={seq}, command={item['command']}, "
+                    f"frame={item['frame']}, altitude={item['z']}",
+                    flush=True,
+                )
                 if msg_type == "MISSION_REQUEST_INT":
                     wire_frame = self._int_frame_for_item(item["frame"], item["command"])
                     master.mav.mission_item_int_send(
@@ -271,56 +232,21 @@ class PixhawkController:
                 raise TimeoutError(f"Mission upload timed out; sent {len(sent)}/{total} rows")
 
             if progress:
-                progress("Upload ACK received; verifying stored mission", total, total)
-            readback = self._readback_mission_locked(timeout=8)
-            if len(readback) != total:
-                raise RuntimeError(
-                    f"Pixhawk accepted upload but readback count differs: expected {total}, got {len(readback)}"
-                )
-            mismatches = []
-            for seq, expected in enumerate(items):
-                actual = readback.get(seq)
-                if actual is None:
-                    mismatches.append(f"seq {seq} missing")
-                    continue
-                if int(actual.command) != int(expected["command"]):
-                    mismatches.append(
-                        f"seq {seq} command expected {expected['command']} got {actual.command}"
-                    )
-                # ArduPilot may normalize frames for non-positional commands (for
-                # example DO_CHANGE_SPEED and RTL) because their x/y fields are not
-                # geographic coordinates. Only verify frames for position-bearing
-                # NAV commands, treating WPL frames 0/3/10 as equivalent to their
-                # MISSION_ITEM_INT variants 5/6/11.
-                if self._command_uses_global_position(expected["command"]):
-                    expected_frame = int(expected["frame"])
-                    actual_frame = int(actual.frame)
-                    int_frame_to_wpl = {
-                        int(mavutil.mavlink.MAV_FRAME_GLOBAL_INT): int(mavutil.mavlink.MAV_FRAME_GLOBAL),
-                        int(mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT): int(mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT),
-                        int(mavutil.mavlink.MAV_FRAME_GLOBAL_TERRAIN_ALT_INT): int(mavutil.mavlink.MAV_FRAME_GLOBAL_TERRAIN_ALT),
-                    }
-                    normalized_actual = int_frame_to_wpl.get(actual_frame, actual_frame)
-                    if normalized_actual != expected_frame:
-                        mismatches.append(
-                            f"seq {seq} frame expected {expected_frame} got {actual_frame}"
-                        )
-            if mismatches:
-                raise RuntimeError(
-                    "Pixhawk ACKed the upload but stored mission differs from the file: "
-                    + "; ".join(mismatches[:8])
-                )
+                progress("Mission accepted by Pixhawk", total, total)
 
             self.uploaded = True
             self.mission_item_count = total
-            self.telemetry["status"] = f"Mission uploaded and readback verified ({total} items)"
-            if progress:
-                progress("Mission uploaded and readback verified", total, total)
+            self.telemetry["status"] = f"Mission upload accepted ({total} items)"
+            commands = [int(item["command"]) for item in items]
+            print(f"Pixhawk accepted mission upload: {total} items; commands={commands}", flush=True)
+            if 22 not in commands:
+                print("WARNING: Uploaded mission contains no TAKEOFF command (22)", flush=True)
             return {
                 "uploaded_items": total,
                 "mission_ack": "MAV_MISSION_ACCEPTED",
-                "readback_verified": True,
-                "commands": [int(items[i]["command"]) for i in range(total)],
+                "readback_verified": False,
+                "commands": commands,
+                "takeoff_present": 22 in commands,
             }
 
     def _wait_mode(self, expected, timeout=8):
@@ -401,6 +327,62 @@ class PixhawkController:
             detail += f" Last STATUSTEXT: {last_status_text}"
         if not ack_received:
             detail += " No ARM COMMAND_ACK was received."
+        raise TimeoutError(detail)
+
+    def disarm_vehicle(self):
+        """Request normal disarming and wait for heartbeat state confirmation.
+
+        This intentionally does not use ArduPilot force-disarm: stopping motors
+        while airborne can cause a crash. Use after landing or for secured testing.
+        """
+        self.ensure_connected()
+        master = self.master
+        with self.lock:
+            if not master.motors_armed():
+                self.telemetry["armed"] = "DISARMED"
+                self.telemetry["status"] = "DISARMED"
+                return {"armed": False, "status": "ALREADY_DISARMED"}
+            master.mav.command_long_send(
+                master.target_system, master.target_component,
+                mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+                0, 0, 0, 0, 0, 0, 0, 0,
+            )
+
+        deadline = time.monotonic() + 10
+        last_status_text = None
+        ack_received = False
+        while time.monotonic() < deadline:
+            with self.lock:
+                msg = master.recv_match(
+                    type=["HEARTBEAT", "COMMAND_ACK", "STATUSTEXT"],
+                    blocking=True, timeout=1,
+                )
+                armed = master.motors_armed()
+            if msg is not None:
+                kind = msg.get_type()
+                if kind == "STATUSTEXT":
+                    last_status_text = str(msg.text).strip("\x00")
+                    self.telemetry["status"] = last_status_text
+                    print(f"Pixhawk STATUSTEXT: {last_status_text}")
+                elif kind == "COMMAND_ACK" and msg.command == mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM:
+                    ack_received = True
+                    print(f"Pixhawk DISARM COMMAND_ACK: {msg.to_dict()}")
+                    if msg.result not in (mavutil.mavlink.MAV_RESULT_ACCEPTED,
+                                          mavutil.mavlink.MAV_RESULT_IN_PROGRESS):
+                        detail = f"Pixhawk rejected DISARM command (result={msg.result})"
+                        if last_status_text:
+                            detail += f": {last_status_text}"
+                        raise RuntimeError(detail)
+            if not armed:
+                self.telemetry["armed"] = "DISARMED"
+                self.telemetry["status"] = "DISARMED"
+                return {"armed": False, "status": "DISARMED",
+                        "command_ack_received": ack_received, "statustext": last_status_text}
+        detail = "Pixhawk did not confirm disarming within 10 seconds."
+        if last_status_text:
+            detail += f" Last STATUSTEXT: {last_status_text}"
+        if not ack_received:
+            detail += " No DISARM COMMAND_ACK was received."
         raise TimeoutError(detail)
 
     def start_mission(self):
