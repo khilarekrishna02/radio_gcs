@@ -1,0 +1,8 @@
+ultralytics
+opencv-python
+pandas
+numpy
+pymavlink
+pyrealsense2
+torch
+torchvision
