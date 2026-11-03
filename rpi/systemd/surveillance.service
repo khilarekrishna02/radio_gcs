@@ -1,0 +1,14 @@
+[Unit]
+Description=Drone Vision Surveillance & Telemetry Service
+After=network.target multi-user.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/path/to/your/rpi/folder
+ExecStart=/usr/bin/python3 /path/to/your/rpi/flask_app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
