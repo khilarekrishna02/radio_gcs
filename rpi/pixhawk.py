@@ -13,7 +13,8 @@ class PixhawkController:
         self.last_error = None
         self.telemetry = {"lat": None, "lon": None, "alt": None, "mode": None,
                           "status": "Waiting for Pixhawk", "groundspeed": None,
-                          "lidar_reading": None, "armed": "UNKNOWN"}
+                          "lidar_reading": None, "armed": "UNKNOWN",
+                          "roll": 0.0, "pitch": 0.0, "yaw": 0.0}
         self.uploaded = False
         self.mission_item_count = 0
 
@@ -79,6 +80,10 @@ class PixhawkController:
                         self.telemetry["alt"] = msg.relative_alt / 1000.0
                         self.telemetry["mode"] = getattr(self.master, "flightmode", "UNKNOWN")
                         self.telemetry["armed"] = "ARMED" if self.master.motors_armed() else "DISARMED"
+                    elif kind == "ATTITUDE":
+                        self.telemetry["roll"] = msg.roll
+                        self.telemetry["pitch"] = msg.pitch
+                        self.telemetry["yaw"] = msg.yaw    
                     elif kind == "STATUSTEXT":
                         self.telemetry["status"] = msg.text
                     elif kind == "VFR_HUD":
@@ -407,3 +412,14 @@ class PixhawkController:
                 mavutil.mavlink.MAV_CMD_MISSION_START, 0, 0, 0, 0, 0, 0, 0, 0)
         return {"sequence": "GUIDED -> ARM confirmed -> AUTO confirmed -> MISSION_START sent",
                 "note": "Existing mission commands, including takeoff, are preserved."}
+
+    def get_gps(self):
+        return {"lat": self.telemetry["lat"], "lon": self.telemetry["lon"], "alt": self.telemetry["alt"]}
+
+    def get_attitude(self):
+        return {"r": self.telemetry["roll"], "p": self.telemetry["pitch"], "y": self.telemetry["yaw"]}
+
+    def get_lidar(self):
+        if self.telemetry["lidar_reading"] is not None:
+            return {"d": self.telemetry["lidar_reading"]}
+        return None
