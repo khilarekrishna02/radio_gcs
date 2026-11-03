@@ -19,6 +19,7 @@ class RadioBridge:
         self.thread = None
         self.telemetry = {"connected": False}
         self.events = []
+        self.detected_targets = {}
         self.last_rx = None
 
     def start(self):
@@ -40,6 +41,14 @@ class RadioBridge:
                 line = self.serial.readline()
                 if not line:
                     continue
+                # NEW: Catch raw target strings before JSON decoding
+                raw_str = line.decode('utf-8', errors='ignore').strip()
+                    if raw_str.startswith("TARGET:"):
+                parts = raw_str.replace("TARGET:", "").split(",")
+                    if len(parts) == 3:
+                    pid, lat, lon = parts
+                    self.detected_targets[pid] = {"lat": float(lat), "lon": float(lon)}
+                        continue
                 msg = decode_message(line)
                 self.last_rx = time.time()
                 typ = msg.get("type")
