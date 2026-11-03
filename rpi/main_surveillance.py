@@ -16,7 +16,7 @@ def surveillance_loop(pixhawk_controller, running_event, radio_link):
         time.sleep(1)
 
     print("[INFO] Flight Controller linked. Starting main vision loop.")
-    
+
     try:
         while running_event.is_set():
             # Pull the cached dictionaries we just added to pixhawk.py
