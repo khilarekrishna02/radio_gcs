@@ -24,6 +24,10 @@ def ensure_radio():
             bridge_error = str(exc)
             raise RuntimeError(f"Cannot open ground SiK radio on {config.RADIO_PORT}: {exc}")
 
+@app.route('/api/targets', methods=['GET'])
+def get_detected_targets():
+    """Exposes the live drone target coordinates captured by the radio bridge."""
+    return jsonify(getattr(bridge, 'detected_targets', {}))
 
 @app.get("/")
 def home():
