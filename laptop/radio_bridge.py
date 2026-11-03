@@ -48,7 +48,10 @@ class RadioBridge:
                     if len(parts) == 3:
                     pid, lat, lon = parts
                     self.detected_targets[pid] = {"lat": float(lat), "lon": float(lon)}
-                        continue
+                         # Added terminal alert:
+                        print(f"\n🚨 HUMAN DETECTED! (Target ID: {pid} at {lat}, {lon})")
+                    continue
+               
                 msg = decode_message(line)
                 self.last_rx = time.time()
                 typ = msg.get("type")
