@@ -5,6 +5,8 @@ from flask import Flask, jsonify
 import config
 from pixhawk import PixhawkController
 from radio_bridge import RadioBridge
+from main_surveillance import surveillance_loop
+
 
 app = Flask(__name__)
 pixhawk = PixhawkController()
@@ -13,6 +15,7 @@ running.set()
 telemetry_thread = threading.Thread(target=pixhawk.telemetry_loop, args=(running,), daemon=True, name="pixhawk-telemetry")
 radio = RadioBridge(pixhawk)
 started = False
+threading.Thread(target=surveillance_loop, args=(pixhawk, running, radio), daemon=True).start()
 
 
 def start_services():
@@ -47,6 +50,8 @@ def mission_status():
     return jsonify({"received": bool(radio.mission_path), "uploaded": pixhawk.uploaded,
                     "mission_item_count": pixhawk.mission_item_count,
                     "filename": os.path.basename(radio.mission_path) if radio.mission_path else None})
+
+threading.Thread(target=surveillance_loop, args=(fc, running_event, radio), daemon=True).start()
 
 
 if __name__ == "__main__":
