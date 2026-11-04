@@ -289,6 +289,21 @@
         <button class="btn" id="model-update-btn">Set Model</button>
     </div>
 </section>
+<!-- SECTION 06: MANUAL CALCULATOR -->
+<section class="panel" style="grid-column: 1 / -1;">
+    <div class="section-head">
+        <div>
+            <h2>06 / Manual Distance Calculator</h2>
+            <div class="muted">Calculates 3D hypotenuse/slant distance from the drone's live telemetry.</div>
+        </div>
+    </div>
+    <div class="d-flex gap-2 mb-2" style="display: flex; gap: 10px;">
+        <input type="number" id="manual-lat" placeholder="Target Latitude (e.g. 18.5204)">
+        <input type="number" id="manual-lon" placeholder="Target Longitude (e.g. 73.8567)">
+        <button class="btn primary" onclick="calculateManualDistance()">Calculate</button>
+    </div>
+    <div style="margin-top: 15px;">Distance from Drone: <strong id="calc-result" style="color: var(--amber);">-- meters</strong></div>
+</section>
             
         </div>
         
@@ -548,5 +563,82 @@ $('model-update-btn').addEventListener('click', async () => {
 });
         
     </script>
+<script>
+function calculateManualDistance() {
+    const targetLat = parseFloat(document.getElementById('manual-lat').value);
+    const targetLon = parseFloat(document.getElementById('manual-lon').value);
+    
+    // Scrape live data directly from your telemetry UI boxes
+    const droneLat = parseFloat(document.getElementById('lat').innerText);
+    const droneLon = parseFloat(document.getElementById('lon').innerText);
+    const droneAlt = parseFloat(document.getElementById('alt').innerText);
+
+    if (isNaN(targetLat) || isNaN(targetLon)) {
+        alert("Please enter valid target coordinates.");
+        return;
+    }
+
+    if (isNaN(droneLat) || isNaN(droneLon) || isNaN(droneAlt)) {
+        alert("Waiting for live drone telemetry. Cannot calculate yet!");
+        return;
+    }
+
+    const R = 6371e3; // Earth radius in meters
+    const p1 = droneLat * Math.PI/180, p2 = targetLat * Math.PI/180;
+    const dp = (targetLat-droneLat) * Math.PI/180;
+    const dl = (targetLon-droneLon) * Math.PI/180;
+
+    const a = Math.sin(dp/2) * Math.sin(dp/2) + 
+              Math.cos(p1) * Math.cos(p2) * 
+              Math.sin(dl/2) * Math.sin(dl/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const groundDistance = R * c; 
+
+    // Calculate 3D hypotenuse (slant) distance
+    const slantDistance = Math.sqrt(Math.pow(groundDistance, 2) + Math.pow(droneAlt, 2));
+
+    document.getElementById('calc-result').innerText = Math.round(slantDistance) + " meters (Slant)";
+}
+</script>
+
+
+
+<script>
+function calculateManualDistance() {
+    const targetLat = parseFloat(document.getElementById('manual-lat').value);
+    const targetLon = parseFloat(document.getElementById('manual-lon').value);
+    
+    // Scrape live data directly from your telemetry UI boxes
+    const droneLat = parseFloat(document.getElementById('lat').innerText);
+    const droneLon = parseFloat(document.getElementById('lon').innerText);
+    const droneAlt = parseFloat(document.getElementById('alt').innerText);
+
+    if (isNaN(targetLat) || isNaN(targetLon)) {
+        alert("Please enter valid target coordinates.");
+        return;
+    }
+
+    if (isNaN(droneLat) || isNaN(droneLon) || isNaN(droneAlt)) {
+        alert("Waiting for live drone telemetry. Cannot calculate yet!");
+        return;
+    }
+
+    const R = 6371e3; // Earth radius in meters
+    const p1 = droneLat * Math.PI/180, p2 = targetLat * Math.PI/180;
+    const dp = (targetLat-droneLat) * Math.PI/180;
+    const dl = (targetLon-droneLon) * Math.PI/180;
+
+    const a = Math.sin(dp/2) * Math.sin(dp/2) + 
+              Math.cos(p1) * Math.cos(p2) * 
+              Math.sin(dl/2) * Math.sin(dl/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const groundDistance = R * c; 
+
+    // Calculate 3D hypotenuse (slant) distance
+    const slantDistance = Math.sqrt(Math.pow(groundDistance, 2) + Math.pow(droneAlt, 2));
+
+    document.getElementById('calc-result').innerText = Math.round(slantDistance) + " meters (Slant)";
+}
+</script>
 </body>
 </html>
