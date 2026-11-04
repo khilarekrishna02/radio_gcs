@@ -5,8 +5,8 @@ After=network.target multi-user.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=jetson_arsc/radio_gcs/rpi/systemd/surveillance.service
-ExecStart=/usr/bin/python3 /path/to/your/rpi/flask_app.py
+WorkingDirectory=/home/jetson_arsc/radio_gcs/rpi
+ExecStart=/usr/bin/python3/vision_geotag.py
 Restart=always
 RestartSec=5
 
