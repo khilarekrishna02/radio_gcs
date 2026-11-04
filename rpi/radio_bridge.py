@@ -76,6 +76,22 @@ class RadioBridge:
                 line = self.serial.readline()
                 if not line:
                     continue
+                                    # Catch raw camera commands from laptop
+                raw_str = line.decode('utf-8', errors='ignore').strip()
+                if raw_str == "CMD:VISION_START":
+                    if hasattr(self, 'vision_thread'):
+                            self.vision_thread.start_camera()
+                        continue
+                elif raw_str == "CMD:VISION_STOP":
+                    if hasattr(self, 'vision_thread'):
+                            self.vision_thread.stop_camera()
+                        continue
+                elif raw_str.startswith("CMD:MODEL,"):
+                    new_model = raw_str.split(",")[1]
+                    if hasattr(self, 'vision_thread'):
+                            self.vision_thread.load_model(new_model)
+                        continue
+                        
                 msg = decode_message(line)
                 request_id = msg.get("request_id")
                 payload = msg.get("payload") or {}
