@@ -200,8 +200,36 @@ threading.Thread(target=mav_reader,daemon=True).start()
 
 # ================= MAIN LOOP =================
 serial=1; frame=0
+camera_running = True
+
 try:
     while True:
+        try:
+            with open("/tmp/vision_cmd.txt", "r") as f: 
+                cmd = f.read().strip()
+            if cmd == "STOP" and camera_running:
+                print("[INFO] Pausing RealSense pipeline...")
+                pipe.stop()
+                camera_running = False
+            elif cmd == "START" and not camera_running:
+                print("[INFO] Resuming RealSense pipeline...")
+                pipe.start(cfg)
+                camera_running = True
+            elif cmd.startswith("MODEL,"):
+                new_model = cmd.split(",")[1]
+                print(f"[INFO] Swapping YOLO model to {new_model}...")
+                model = YOLO(new_model)
+                if torch.cuda.is_available(): model.to("cuda:0")
+                with open("/tmp/vision_cmd.txt", "w") as f: 
+                    f.write("START" if camera_running else "STOP")
+        except Exception:
+            pass 
+            
+        if not camera_running:
+            time.sleep(0.5)
+            continue 
+        # -----------------------
+
         f=pipe.wait_for_frames().get_color_frame()
         img=np.asanyarray(f.get_data())
         vis = img.copy()     

@@ -41,15 +41,17 @@ class RadioBridge:
                 line = self.serial.readline()
                 if not line:
                     continue
-                # NEW: Catch raw target strings before JSON decoding
+                # Catch raw camera commands from laptop and drop them in the mailbox
                 raw_str = line.decode('utf-8', errors='ignore').strip()
-                    if raw_str.startswith("TARGET:"):
-                parts = raw_str.replace("TARGET:", "").split(",")
-                    if len(parts) == 3:
-                    pid, lat, lon = parts
-                    self.detected_targets[pid] = {"lat": float(lat), "lon": float(lon)}
-                         # Added terminal alert:
-                        print(f"\n🚨 HUMAN DETECTED! (Target ID: {pid} at {lat}, {lon})")
+                if raw_str == "CMD:VISION_START":
+                    with open("/tmp/vision_cmd.txt", "w") as f: f.write("START")
+                    continue
+                elif raw_str == "CMD:VISION_STOP":
+                    with open("/tmp/vision_cmd.txt", "w") as f: f.write("STOP")
+                    continue
+                elif raw_str.startswith("CMD:MODEL,"):
+                    new_model = raw_str.split(",")[1]
+                    with open("/tmp/vision_cmd.txt", "w") as f: f.write(f"MODEL,{new_model}")
                     continue
                
                 msg = decode_message(line)
