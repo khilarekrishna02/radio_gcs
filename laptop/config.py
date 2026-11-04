@@ -1,6 +1,6 @@
 import os
 
-RADIO_PORT = os.getenv("GCS_RADIO_PORT", "COM13")
+RADIO_PORT = os.getenv("GCS_RADIO_PORT", "COM12")
 RADIO_BAUD = int(os.getenv("GCS_RADIO_BAUD", "57600"))
 WEB_HOST = os.getenv("GCS_WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.getenv("GCS_WEB_PORT", "5000"))

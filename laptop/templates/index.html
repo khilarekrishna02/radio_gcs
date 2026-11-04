@@ -564,81 +564,80 @@ $('model-update-btn').addEventListener('click', async () => {
         
     </script>
 <script>
-function calculateManualDistance() {
-    const targetLat = parseFloat(document.getElementById('manual-lat').value);
-    const targetLon = parseFloat(document.getElementById('manual-lon').value);
-    
-    // Scrape live data directly from your telemetry UI boxes
-    const droneLat = parseFloat(document.getElementById('lat').innerText);
-    const droneLon = parseFloat(document.getElementById('lon').innerText);
-    const droneAlt = parseFloat(document.getElementById('alt').innerText);
+// ================= VISION SYSTEM CONTROLS =================
+        let isCameraRunning = false;
+        const camToggleBtn = $('cam-toggle-btn');
+        const modelUpdateBtn = $('model-update-btn');
+        const modelSelect = $('vision-model');
 
-    if (isNaN(targetLat) || isNaN(targetLon)) {
-        alert("Please enter valid target coordinates.");
-        return;
-    }
+        camToggleBtn.addEventListener('click', async () => {
+            camToggleBtn.disabled = true;
+            isCameraRunning = !isCameraRunning;
+            const action = isCameraRunning ? "start" : "stop";
+            
+            toast(`Sending camera ${action} command...`);
+            
+            try {
+                const d = await api(`/api/vision/${action}`, { method: 'POST' });
+                camToggleBtn.textContent = isCameraRunning ? 'Stop Camera' : 'Start Camera';
+                camToggleBtn.className = isCameraRunning ? 'btn warn' : 'btn primary';
+                toast(d.message);
+            } catch (err) { 
+                toast(err.message, 'error');
+                isCameraRunning = !isCameraRunning; // Revert state on failure
+            } finally { 
+                camToggleBtn.disabled = false; 
+            }
+        });
 
-    if (isNaN(droneLat) || isNaN(droneLon) || isNaN(droneAlt)) {
-        alert("Waiting for live drone telemetry. Cannot calculate yet!");
-        return;
-    }
+        modelUpdateBtn.addEventListener('click', async () => {
+            modelUpdateBtn.disabled = true;
+            const selectedModel = modelSelect.value;
+            
+            try {
+                const formData = new FormData();
+                formData.append('model', selectedModel);
+                const d = await api('/api/vision/model', { method: 'POST', body: formData });
+                toast(`Model updated to ${selectedModel}`);
+            } catch (err) { 
+                toast(err.message, 'error'); 
+            } finally { 
+                modelUpdateBtn.disabled = false; 
+            }
+        });
 
-    const R = 6371e3; // Earth radius in meters
-    const p1 = droneLat * Math.PI/180, p2 = targetLat * Math.PI/180;
-    const dp = (targetLat-droneLat) * Math.PI/180;
-    const dl = (targetLon-droneLon) * Math.PI/180;
+        // ================= MANUAL DISTANCE CALCULATOR =================
+        window.calculateManualDistance = function() {
+            const targetLat = parseFloat($('manual-lat').value);
+            const targetLon = parseFloat($('manual-lon').value);
+            
+            const droneLat = parseFloat($('lat').innerText);
+            const droneLon = parseFloat($('lon').innerText);
+            const droneAlt = parseFloat($('alt').innerText);
 
-    const a = Math.sin(dp/2) * Math.sin(dp/2) + 
-              Math.cos(p1) * Math.cos(p2) * 
-              Math.sin(dl/2) * Math.sin(dl/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const groundDistance = R * c; 
+            if (isNaN(targetLat) || isNaN(targetLon)) {
+                alert("Please enter valid target coordinates.");
+                return;
+            }
+            if (isNaN(droneLat) || isNaN(droneLon) || isNaN(droneAlt)) {
+                alert("Waiting for live drone telemetry. Cannot calculate yet!");
+                return;
+            }
 
-    // Calculate 3D hypotenuse (slant) distance
-    const slantDistance = Math.sqrt(Math.pow(groundDistance, 2) + Math.pow(droneAlt, 2));
+            const R = 6371e3; 
+            const p1 = droneLat * Math.PI/180, p2 = targetLat * Math.PI/180;
+            const dp = (targetLat-droneLat) * Math.PI/180;
+            const dl = (targetLon-droneLon) * Math.PI/180;
 
-    document.getElementById('calc-result').innerText = Math.round(slantDistance) + " meters (Slant)";
-}
-</script>
+            const a = Math.sin(dp/2) * Math.sin(dp/2) + 
+                      Math.cos(p1) * Math.cos(p2) * 
+                      Math.sin(dl/2) * Math.sin(dl/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const groundDistance = R * c; 
 
-
-
-<script>
-function calculateManualDistance() {
-    const targetLat = parseFloat(document.getElementById('manual-lat').value);
-    const targetLon = parseFloat(document.getElementById('manual-lon').value);
-    
-    // Scrape live data directly from your telemetry UI boxes
-    const droneLat = parseFloat(document.getElementById('lat').innerText);
-    const droneLon = parseFloat(document.getElementById('lon').innerText);
-    const droneAlt = parseFloat(document.getElementById('alt').innerText);
-
-    if (isNaN(targetLat) || isNaN(targetLon)) {
-        alert("Please enter valid target coordinates.");
-        return;
-    }
-
-    if (isNaN(droneLat) || isNaN(droneLon) || isNaN(droneAlt)) {
-        alert("Waiting for live drone telemetry. Cannot calculate yet!");
-        return;
-    }
-
-    const R = 6371e3; // Earth radius in meters
-    const p1 = droneLat * Math.PI/180, p2 = targetLat * Math.PI/180;
-    const dp = (targetLat-droneLat) * Math.PI/180;
-    const dl = (targetLon-droneLon) * Math.PI/180;
-
-    const a = Math.sin(dp/2) * Math.sin(dp/2) + 
-              Math.cos(p1) * Math.cos(p2) * 
-              Math.sin(dl/2) * Math.sin(dl/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const groundDistance = R * c; 
-
-    // Calculate 3D hypotenuse (slant) distance
-    const slantDistance = Math.sqrt(Math.pow(groundDistance, 2) + Math.pow(droneAlt, 2));
-
-    document.getElementById('calc-result').innerText = Math.round(slantDistance) + " meters (Slant)";
-}
-</script>
+            const slantDistance = Math.sqrt(Math.pow(groundDistance, 2) + Math.pow(droneAlt, 2));
+            $('calc-result').innerText = Math.round(slantDistance) + " meters (Slant)";
+        };
+    </script>
 </body>
 </html>
