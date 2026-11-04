@@ -172,7 +172,20 @@ def ping():
         return jsonify({"ok": True, "message": result.get("message", "Pi reachable.")})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 502
+@app.route('/api/vision/<action>', methods=['POST'])
+def control_vision(action):
+    # Sends CMD:VISION_START or CMD:VISION_STOP over the radio
+    command = f"CMD:VISION_{action.upper()}\n"
+    bridge.serial.write(command.encode('utf-8'))
+    return jsonify({"message": f"Camera {action} command broadcasted"})
 
+@app.route('/api/vision/model', methods=['POST'])
+def set_model():
+    model_name = request.form.get('model')
+    command = f"CMD:MODEL,{model_name}\n"
+    bridge.serial.write(command.encode('utf-8'))
+    return jsonify({"message": f"Model update broadcasted: {model_name}"})
+    
 
 if __name__ == "__main__":
     os.makedirs(config.MISSION_DIR, exist_ok=True)
