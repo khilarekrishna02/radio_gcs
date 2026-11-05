@@ -81,16 +81,16 @@ class RadioBridge:
                 if raw_str == "CMD:VISION_START":
                     if hasattr(self, 'vision_thread'):
                             self.vision_thread.start_camera()
-                        continue
+                    continue
                 elif raw_str == "CMD:VISION_STOP":
                     if hasattr(self, 'vision_thread'):
                             self.vision_thread.stop_camera()
-                        continue
+                    continue
                 elif raw_str.startswith("CMD:MODEL,"):
                     new_model = raw_str.split(",")[1]
                     if hasattr(self, 'vision_thread'):
                             self.vision_thread.load_model(new_model)
-                        continue
+                    continue
                         
                 msg = decode_message(line)
                 request_id = msg.get("request_id")

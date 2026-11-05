@@ -304,6 +304,87 @@
     </div>
     <div style="margin-top: 15px;">Distance from Drone: <strong id="calc-result" style="color: var(--amber);">-- meters</strong></div>
 </section>
+
+            <!-- SECTION 07: DRONE 2 RESCUE MISSION -->
+            <section class="panel" style="grid-column: 1 / -1;">
+                <div class="section-head">
+                    <div>
+                        <h2>07 / Drone 2 - Rescue Mission</h2>
+                        <div class="muted">Upload survivor coordinates, optimize the route and execute the rescue mission.</div>
+                    </div>
+                    <span class="pill" id="drone2-link-pill">RADIO LINK · CHECKING</span>
+                </div>
+
+                <h3>Survivor Coordinates</h3>
+                <div class="fields">
+                    <div class="field full">
+                        <label for="survivor-csv">Survivor CSV (manual source)</label>
+                        <input type="file" id="survivor-csv" accept=".csv">
+                    </div>
+                    <div class="field">
+                        <label for="csv-source">Coordinate Source</label>
+                        <select id="csv-source">
+                            <option value="manual">Manual CSV Upload</option>
+                            <option value="drone1">Drone 1 CSV</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="drone2-altitude">Flight Altitude (m)</label>
+                        <input type="number" id="drone2-altitude" value="15" min="1" step="0.5">
+                    </div>
+                    <div class="field">
+                        <label for="drone2-hold">Hover Time (seconds)</label>
+                        <input type="number" id="drone2-hold" value="3" min="0" step="0.5">
+                    </div>
+                    <div class="field">
+                        <label for="drone2-home-lat">Manual Home Latitude (GPS fallback)</label>
+                        <input type="number" id="drone2-home-lat" step="any" placeholder="Optional">
+                    </div>
+                    <div class="field">
+                        <label for="drone2-home-lon">Manual Home Longitude (GPS fallback)</label>
+                        <input type="number" id="drone2-home-lon" step="any" placeholder="Optional">
+                    </div>
+                </div>
+                <div class="actions">
+                    <button class="btn" id="csv-upload-btn">Upload CSV</button>
+                    <button class="btn primary" id="optimize-btn">Optimize Route</button>
+                    <a class="btn" id="drone2-download-btn" href="/api/drone2/download-mission" style="display:none;text-decoration:none;">Download Mission</a>
+                </div>
+                <div class="statusline"><span id="drone2-summary">No Drone 2 mission generated.</span></div>
+
+                <h3>Drone 2 Telemetry</h3>
+                <div class="telemetry">
+                    <div class="metric"><div class="label">LATITUDE</div><div class="value" id="d2-lat">—</div></div>
+                    <div class="metric"><div class="label">LONGITUDE</div><div class="value" id="d2-lon">—</div></div>
+                    <div class="metric"><div class="label">ALTITUDE</div><div class="value"><span id="d2-alt">—</span> <span class="unit">m</span></div></div>
+                    <div class="metric"><div class="label">FLIGHT MODE</div><div class="value" id="d2-mode">—</div></div>
+                    <div class="metric"><div class="label">ARM STATE</div><div class="value" id="d2-armed">—</div></div>
+                    <div class="metric"><div class="label">PIXHAWK STATUS</div><div class="value" id="d2-status">Waiting…</div></div>
+                </div>
+                <div class="statusline">
+                    <span class="dot" id="d2-radio-dot"></span>
+                    <span id="d2-radio-status">Waiting for Drone 2 radio…</span>
+                </div>
+
+                <h3>Mission Execution</h3>
+                <div class="workflow">
+                    <div class="step">
+                        <div class="num">1</div>
+                        <div><strong>Transfer mission to Drone 2 Jetson</strong><small>Chunk transfer with SHA-256 verification</small></div>
+                        <div style="margin-left:auto;"><button class="btn" id="d2-send-btn" disabled>Send Mission</button></div>
+                    </div>
+                    <div class="step">
+                        <div class="num">2</div>
+                        <div><strong>Upload mission to Pixhawk</strong><small>Wait for MAVLink MISSION_ACK</small></div>
+                        <div style="margin-left:auto;"><button class="btn warn" id="d2-upload-btn" disabled>Upload Mission</button></div>
+                    </div>
+                    <div class="step">
+                        <div class="num">3</div>
+                        <div><strong>Start rescue mission</strong><small>Operator confirmation required</small></div>
+                        <div style="margin-left:auto;"><button class="btn green" id="d2-start-btn" disabled>Start Mission</button></div>
+                    </div>
+                </div>
+            </section>
             
         </div>
         
@@ -451,7 +532,10 @@
         async function poll() {
             try {
                 const d = await api('/api/status');
-                const t = d.telemetry || {};
+                const d1 = d.drone1 || {};
+                const d2 = d.drone2 || {};
+                const t = d1.telemetry || {};
+                const t2 = d2.telemetry || {};
                 const age = t.last_update ? Math.max(0, Math.round(Date.now() / 1000 - t.last_update)) : null;
                 
                 showNum('lat', t.lat, 6);
@@ -465,11 +549,21 @@
                 $('status').textContent = t.status || 'Waiting…';
                 $('telemetry-age').textContent = age === null ? 'NO DATA' : age + 's AGO';
                 
-                $('radio-status').textContent = d.radio_running ? `Ground radio open · ${d.radio_port}` : (d.radio_error || 'Radio disconnected');
-                $('radio-dot').className = 'dot ' + (d.radio_running ? 'ok' : 'bad');
-                $('link-pill').textContent = d.radio_running ? 'RADIO LINK · OPEN' : 'RADIO LINK · OFFLINE';
-                
-                $('event-log').textContent = (d.events || []).slice(-8).map(e => new Date(e.time * 1000).toLocaleTimeString() + '  ' + (e.message || 'event')).join('\n') || 'No events yet.';
+                $('radio-status').textContent = d1.radio_running ? `Ground radio open · ${d1.radio_port}` : (d1.radio_error || 'Radio disconnected');
+                $('radio-dot').className = 'dot ' + (d1.radio_running ? 'ok' : 'bad');
+                $('link-pill').textContent = d1.radio_running ? 'RADIO LINK · OPEN' : 'RADIO LINK · OFFLINE';
+
+                $('event-log').textContent = (d1.events || []).slice(-8).map(e => new Date(e.time * 1000).toLocaleTimeString() + '  ' + (e.message || 'event')).join('\n') || 'No events yet.';
+
+                showNum('d2-lat', t2.lat, 6);
+                showNum('d2-lon', t2.lon, 6);
+                showNum('d2-alt', t2.alt, 1);
+                $('d2-mode').textContent = t2.mode || '—';
+                $('d2-armed').textContent = t2.armed === true ? 'ARMED' : t2.armed === false ? 'DISARMED' : '—';
+                $('d2-status').textContent = t2.status || (t2.connected ? 'Connected' : 'Waiting…');
+                $('d2-radio-status').textContent = d2.radio_running ? `Ground radio open · ${d2.radio_port}` : (d2.radio_error || 'Radio disconnected');
+                $('d2-radio-dot').className = 'dot ' + (d2.radio_running ? 'ok' : 'bad');
+                $('drone2-link-pill').textContent = d2.radio_running ? 'RADIO LINK · OPEN' : 'RADIO LINK · OFFLINE';
             } catch (err) {
                 $('radio-status').textContent = 'Website backend unavailable';
                 $('radio-dot').className = 'dot bad';
@@ -639,5 +733,126 @@ $('model-update-btn').addEventListener('click', async () => {
             $('calc-result').innerText = Math.round(slantDistance) + " meters (Slant)";
         };
     </script>
+
+<script>
+// ================= DRONE 2 RESCUE WORKFLOW =================
+let d2Generated = false;
+let d2Sent = false;
+let d2Uploaded = false;
+
+function updateDrone2Buttons() {
+    $('d2-send-btn').disabled = !d2Generated;
+    $('d2-upload-btn').disabled = !d2Sent;
+    $('d2-start-btn').disabled = !d2Uploaded;
+}
+
+$('csv-upload-btn').addEventListener('click', async () => {
+    const file = $('survivor-csv').files[0];
+    if (!file) {
+        toast('Select a survivor CSV file first.', 'error');
+        return;
+    }
+    const form = new FormData();
+    form.append('file', file);
+    try {
+        const d = await api('/api/upload-survivor-csv', {method: 'POST', body: form});
+        toast(`CSV validated: ${d.valid_survivors} valid survivors, ${d.skipped_count} skipped.`);
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+});
+
+$('optimize-btn').addEventListener('click', async () => {
+    const payload = {
+        source: $('csv-source').value,
+        altitude: Number($('drone2-altitude').value),
+        hold_time: Number($('drone2-hold').value),
+        home_lat: $('drone2-home-lat').value || null,
+        home_lon: $('drone2-home-lon').value || null
+    };
+    try {
+        let response = await fetch('/api/optimize-mission', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        let d = await response.json();
+        if (response.status === 409 && d.requires_confirmation) {
+            if (!confirm(`${d.skipped_count} invalid CSV rows will be skipped. Continue?`)) return;
+            payload.confirm_skipped = true;
+            response = await fetch('/api/optimize-mission', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            d = await response.json();
+        }
+        if (!response.ok || d.error) throw new Error(d.error || d.message || 'Optimization failed');
+        d2Generated = true;
+        d2Sent = false;
+        d2Uploaded = false;
+        updateDrone2Buttons();
+        $('drone2-download-btn').style.display = 'inline-block';
+        $('drone2-summary').textContent =
+            `Generated ${d.metadata.total_survivors} survivor stops · ${d.metadata.distance_m} m total route · Home: ${d.metadata.home_source}`;
+        toast(d.message || 'Drone 2 route optimized.');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+});
+
+$('d2-send-btn').addEventListener('click', async () => {
+    const b = $('d2-send-btn');
+    b.disabled = true;
+    try {
+        const d = await api('/api/drone2/send-mission', {method: 'POST'});
+        d2Sent = true;
+        d2Uploaded = false;
+        updateDrone2Buttons();
+        toast(d.message || 'Mission transferred to Drone 2.');
+    } catch (err) {
+        toast(err.message, 'error');
+    } finally {
+        b.disabled = !d2Generated;
+    }
+});
+
+$('d2-upload-btn').addEventListener('click', async () => {
+    if (!confirm('Upload this mission to Drone 2 Pixhawk? The stored mission will be replaced.')) return;
+    const b = $('d2-upload-btn');
+    b.disabled = true;
+    try {
+        const d = await api('/api/drone2/upload-mission', {method: 'POST'});
+        d2Uploaded = true;
+        updateDrone2Buttons();
+        toast(d.message || 'Drone 2 mission uploaded and acknowledged.');
+    } catch (err) {
+        d2Uploaded = false;
+        updateDrone2Buttons();
+        toast(err.message, 'error');
+    } finally {
+        b.disabled = !d2Sent;
+    }
+});
+
+$('d2-start-btn').addEventListener('click', async () => {
+    if (!confirm('Confirm Drone 2 is in a safe area, the mission is verified, and the operator is ready to start.')) return;
+    const b = $('d2-start-btn');
+    b.disabled = true;
+    try {
+        const d = await api('/api/drone2/start-mission', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({operator_confirmed: true})
+        });
+        toast(d.message || 'Drone 2 start command acknowledged.');
+    } catch (err) {
+        toast(err.message, 'error');
+    } finally {
+        b.disabled = !d2Uploaded;
+    }
+});
+
+updateDrone2Buttons();
+</script>
+
 </body>
 </html>

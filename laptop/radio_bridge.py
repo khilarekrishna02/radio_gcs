@@ -10,7 +10,7 @@ from request_manager import RequestManager
 
 class RadioBridge:
     """Owns the laptop ground-radio serial port. Do not open COM13 elsewhere."""
-    def __init__(self, port=RADIO_PORT, baud=RADIO_BAUD):
+    def __init__(self, port, baud):
         self.port, self.baud = port, baud
         self.serial = None
         self.requests = RequestManager()
@@ -79,7 +79,7 @@ class RadioBridge:
 
     def request(self, message_type, payload=None, timeout=None, attempts=3):
         request_id = self.requests.create()
-        wait_seconds = timeout or RADIO_TIMEOUT
+        wait_seconds = timeout if timeout is not None else RADIO_TIMEOUT
         last_error = None
         for attempt in range(attempts):
             if attempt:
