@@ -1,6 +1,7 @@
 import os
 import tempfile
 import threading
+import time
 from flask import Flask, jsonify, render_template, request, send_file
 import config
 from mission_planner import parse_kml_polygon, generate_reference_serpentine
@@ -12,6 +13,10 @@ bridge_error = None
 mission_path = None
 mission_meta = None
 mission_lock = threading.Lock()
+# Progress of the one-click "Execute mission" sequence (polled by the page).
+# Key is "failure", not "error": the page's api() helper treats any "error" key as a failed request.
+execute_state = {"running": False, "step": "idle", "failure": None, "done": False}
+execute_lock = threading.Lock()
 
 
 def ensure_radio():
@@ -36,9 +41,13 @@ def home():
 
 @app.get("/api/status")
 def status():
+    last_rx = bridge.last_rx
     return jsonify({"radio_running": bridge.running, "radio_port": config.RADIO_PORT,
                     "radio_error": bridge_error, "telemetry": bridge.telemetry,
-                    "events": bridge.events[-15:], "mission": mission_meta})
+                    "events": bridge.events[-15:], "mission": mission_meta,
+                    "port_open": bridge.port_open,
+                    "link_age": (time.time() - last_rx) if last_rx else None,
+                    "execute": execute_state})
 
 
 @app.get("/api/ports")
@@ -174,23 +183,104 @@ def ping():
         return jsonify({"error": str(exc)}), 502
 @app.route('/api/vision/<action>', methods=['POST'])
 def control_vision(action):
-    # Sends CMD:VISION_START or CMD:VISION_STOP over the radio
-    command = f"CMD:VISION_{action.upper()}\n"
-    bridge.serial.write(command.encode('utf-8'))
-    return jsonify({"message": f"Camera {action} command broadcasted"})
+    action = action.lower()
+    if action not in ("start", "stop"):
+        return jsonify({"error": "Unknown vision action"}), 400
+    try:
+        ensure_radio()
+        result = bridge.request(f"VISION_{action.upper()}", {}, timeout=10)
+        return jsonify({"message": result.get("message", f"Camera {action} command acknowledged")})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
 
 @app.route('/api/vision/model', methods=['POST'])
 def set_model():
-    model_name = request.form.get('model')
-    command = f"CMD:MODEL,{model_name}\n"
-    bridge.serial.write(command.encode('utf-8'))
-    return jsonify({"message": f"Model update broadcasted: {model_name}"})
-    
+    model_name = request.form.get('model', '')
+    try:
+        ensure_radio()
+        result = bridge.request("VISION_MODEL", {"model": model_name}, timeout=30)
+        return jsonify({"message": result.get("message", f"Model update acknowledged: {model_name}")})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+def _execute_worker(path):
+    """Full chain every time, so a rebooted Jetson / stale flags can never leave it half-armed."""
+    global mission_meta
+    def step(text):
+        execute_state["step"] = text
+    try:
+        step("Checking radio link")
+        ensure_radio()
+        ping = bridge.request("PING", {}, timeout=5)
+        if not (ping.get("data") or {}).get("pixhawk_connected"):
+            raise RuntimeError("Pixhawk is not connected on the drone")
+        tel = bridge.telemetry or {}
+        if tel.get("lat") is None:
+            raise RuntimeError("No GPS position from the drone yet")
+        if time.time() - (tel.get("last_update") or 0) > 10:
+            raise RuntimeError("No recent telemetry from the drone")
+
+        step("Sending waypoint file to drone")
+        result = bridge.send_mission_file(path, chunk_bytes=config.CHUNK_BYTES)
+        mission_meta = {**(mission_meta or {}), "sent_to_pi": True, "transfer": result, "uploaded": False}
+
+        step("Uploading mission to Pixhawk")
+        up = bridge.request("UPLOAD_REQUEST", {}, timeout=120)
+        mission_meta = {**mission_meta, "uploaded": True, "upload_result": up.get("data", {})}
+
+        step("Starting camera and detection")
+        bridge.request("VISION_START", {}, timeout=15)
+
+        step("Arming and starting mission")
+        bridge.request("START_REQUEST", {"operator_confirmed": True}, timeout=60)
+
+        execute_state["done"] = True
+        step("Mission running")
+    except Exception as exc:
+        execute_state["failure"] = f"{execute_state['step']}: {exc}"
+    finally:
+        execute_state["running"] = False
+
+
+@app.post("/api/execute-mission")
+def execute_mission():
+    body = request.get_json(silent=True) or {}
+    if body.get("confirmed") is not True:
+        return jsonify({"error": "Operator confirmation is required"}), 400
+    with mission_lock:
+        path = mission_path
+    if not path or not os.path.isfile(path):
+        return jsonify({"error": "Generate a mission first."}), 400
+    with execute_lock:
+        if execute_state["running"]:
+            return jsonify({"error": "A mission start is already in progress."}), 409
+        execute_state.update(running=True, step="Starting", failure=None, done=False)
+    threading.Thread(target=_execute_worker, args=(path,), daemon=True, name="execute-mission").start()
+    return jsonify({"ok": True, "message": "Mission start sequence began."})
+
+
+@app.get("/api/execute-status")
+def execute_status():
+    return jsonify(execute_state)
+
+
+def _radio_supervisor():
+    """Opens the ground radio as soon as it is plugged in (the bridge itself handles re-plugs)."""
+    while True:
+        if not bridge.running:
+            try:
+                ensure_radio()
+            except Exception:
+                pass
+        time.sleep(3)
+
 
 if __name__ == "__main__":
     os.makedirs(config.MISSION_DIR, exist_ok=True)
     try:
         ensure_radio()
     except Exception as exc:
-        print(f"[WARN] {exc}. Web UI will start; set GCS_RADIO_PORT and restart when the radio is connected.")
+        print(f"[WARN] {exc}. Web UI will start; the radio will be opened automatically once it is plugged in.")
+    threading.Thread(target=_radio_supervisor, daemon=True, name="radio-supervisor").start()
     app.run(host=config.WEB_HOST, port=config.WEB_PORT, debug=False, use_reloader=False, threaded=True)

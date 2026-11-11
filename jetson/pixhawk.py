@@ -1,6 +1,7 @@
 """Pixhawk serial connection and MAVLink mission operations. One process owns this connection."""
 import threading
 import time
+from collections import deque
 from pymavlink import mavutil
 import config
 
@@ -17,6 +18,12 @@ class PixhawkController:
                           "roll": 0.0, "pitch": 0.0, "yaw": 0.0}
         self.uploaded = False
         self.mission_item_count = 0
+        # Short timestamped history so vision can look samples up at the FRAME time.
+        # Altitude in these buffers is metres above home (same as telemetry["alt"]).
+        self._buf_lock = threading.Lock()
+        self._gps_buf = deque(maxlen=200)
+        self._att_buf = deque(maxlen=400)
+        self._lidar_buf = deque(maxlen=200)
 
     def connect(self):
         if self.master is not None:
@@ -41,11 +48,8 @@ class PixhawkController:
             self.connected = True
             self.telemetry["mode"] = getattr(conn, "flightmode", "UNKNOWN")
             self.telemetry["status"] = f"Pixhawk connected on {port}"
-            try:
-                conn.mav.request_data_stream_send(conn.target_system, conn.target_component,
-                                                 mavutil.mavlink.MAV_DATA_STREAM_ALL, 4, 1)
-            except Exception:
-                pass
+            # Request targeted high-speed streams instead of a flat 4Hz all-stream
+            self.request_stream_rates()
             return True
         except Exception as exc:
             self.last_error = str(exc)
@@ -74,16 +78,22 @@ class PixhawkController:
                     if msg is None:
                         continue
                     kind = msg.get_type()
+                    now = time.time()
                     if kind == "GLOBAL_POSITION_INT":
                         self.telemetry["lat"] = msg.lat / 1e7
                         self.telemetry["lon"] = msg.lon / 1e7
                         self.telemetry["alt"] = msg.relative_alt / 1000.0
                         self.telemetry["mode"] = getattr(self.master, "flightmode", "UNKNOWN")
+                        self.telemetry["gps_time"] = time.time()
                         self.telemetry["armed"] = "ARMED" if self.master.motors_armed() else "DISARMED"
+                        self._push(self._gps_buf, {"t": now, "lat": msg.lat / 1e7, "lon": msg.lon / 1e7,
+                                                   "alt": msg.relative_alt / 1000.0})
                     elif kind == "ATTITUDE":
                         self.telemetry["roll"] = msg.roll
                         self.telemetry["pitch"] = msg.pitch
-                        self.telemetry["yaw"] = msg.yaw    
+                        self.telemetry["yaw"] = msg.yaw   
+                        self.telemetry["att_time"] = time.time() 
+                        self._push(self._att_buf, {"t": now, "r": msg.roll, "p": msg.pitch, "y": msg.yaw})
                     elif kind == "STATUSTEXT":
                         self.telemetry["status"] = msg.text
                     elif kind == "VFR_HUD":
@@ -91,6 +101,12 @@ class PixhawkController:
                     elif kind == "DISTANCE_SENSOR" and config.LIDAR_ENABLED:
                         if hasattr(msg, "current_distance"):
                             self.telemetry["lidar_reading"] = msg.current_distance
+                            # Buffer only readings inside the sensor's valid range, converted cm -> m.
+                            cur = msg.current_distance
+                            lo = getattr(msg, "min_distance", 0)
+                            hi = getattr(msg, "max_distance", 0)
+                            if cur > 0 and (hi <= 0 or lo <= cur <= hi):
+                                self._push(self._lidar_buf, {"t": now, "d": cur / 100.0})
             except Exception as exc:
                 self.last_error = str(exc)
                 self.telemetry["status"] = f"Telemetry error: {exc}"
@@ -412,14 +428,67 @@ class PixhawkController:
                 mavutil.mavlink.MAV_CMD_MISSION_START, 0, 0, 0, 0, 0, 0, 0, 0)
         return {"sequence": "GUIDED -> ARM confirmed -> AUTO confirmed -> MISSION_START sent",
                 "note": "Existing mission commands, including takeoff, are preserved."}
+    
+    def request_stream_rates(self):
+        """Forces Pixhawk to stream required telemetry at necessary Hz for vision tracking."""
+        rates = [
+            (33, 10),  # GLOBAL_POSITION_INT at 10Hz (0.1s)
+            (30, 20),  # ATTITUDE at 20Hz (0.05s)
+            (132, 10)  # DISTANCE_SENSOR at 10Hz (0.1s)
+        ]
+        for msg_id, hz in rates:
+            try:
+                self.master.mav.command_long_send(
+                    self.master.target_system, self.master.target_component,
+                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                    msg_id, int(1e6 / hz), 0, 0, 0, 0, 0
+                )
+            except Exception as e:
+                print(f"[WARN] Failed to set stream rate for {msg_id}: {e}")
+        print("[INFO] Requested high-speed stream rates for Vision setup.")
+
+    def _push(self, buf, sample):
+        with self._buf_lock:
+            buf.append(sample)
+
+    def _nearest(self, buf, t, max_dt):
+        with self._buf_lock:
+            samples = list(buf)
+        if not samples:
+            return None
+        s = min(samples, key=lambda x: abs(x["t"] - t))
+        return s if abs(s["t"] - t) <= max_dt else None
+
+    def get_gps_at(self, t, max_dt=0.5):
+        """Nearest GPS sample to time t: {"t","lat","lon","alt"} (alt = m above home) or None."""
+        return self._nearest(self._gps_buf, t, max_dt)
+
+    def get_attitude_at(self, t, max_dt=0.15):
+        """Nearest attitude sample to time t: {"t","r","p","y"} (radians) or None."""
+        return self._nearest(self._att_buf, t, max_dt)
+
+    def get_lidar_at(self, t, max_dt=0.5):
+        """Nearest valid downward-range sample to time t: {"t","d"} (metres) or None."""
+        return self._nearest(self._lidar_buf, t, max_dt)
 
     def get_gps(self):
-        return {"lat": self.telemetry["lat"], "lon": self.telemetry["lon"], "alt": self.telemetry["alt"]}
+        return {
+            "lat": self.telemetry.get("lat"), 
+            "lon": self.telemetry.get("lon"), 
+            "alt": self.telemetry.get("alt"),
+            "relative_alt": self.telemetry.get("alt"),   # telemetry["alt"] already IS relative altitude
+            "time": self.telemetry.get("gps_time", 0.0)
+        }
 
     def get_attitude(self):
-        return {"r": self.telemetry["roll"], "p": self.telemetry["pitch"], "y": self.telemetry["yaw"]}
+        return {
+            "roll": self.telemetry.get("roll"), 
+            "pitch": self.telemetry.get("pitch"), 
+            "yaw": self.telemetry.get("yaw"),
+            "time": self.telemetry.get("att_time", 0.0)
+        }
 
     def get_lidar(self):
-        if self.telemetry["lidar_reading"] is not None:
-            return {"d": self.telemetry["lidar_reading"]}
-        return None
+        """Latest valid lidar sample {"t","d"} with d in METRES, or None."""
+        with self._buf_lock:
+            return dict(self._lidar_buf[-1]) if self._lidar_buf else None

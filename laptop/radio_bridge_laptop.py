@@ -22,6 +22,15 @@ class RadioBridge:
         self.detected_targets = {}
         self.last_rx = None
 
+    @property
+    def port_open(self):
+        ser = self.serial
+        return bool(ser and ser.is_open)
+
+    def _log_event(self, message):
+        self.events.append({"time": time.time(), "message": message})
+        self.events = self.events[-100:]
+
     def start(self):
         if self.running:
             return
@@ -37,23 +46,20 @@ class RadioBridge:
 
     def _reader(self):
         while self.running:
+            # Reopen the ground radio if it was unplugged or never came up.
+            ser = self.serial
+            if ser is None or not ser.is_open:
+                try:
+                    self.serial = serial.Serial(self.port, self.baud, timeout=0.25, write_timeout=3)
+                    self._log_event(f"Ground radio reopened on {self.port}")
+                except Exception:
+                    time.sleep(2)
+                continue
             try:
-                line = self.serial.readline()
+                line = ser.readline()
                 if not line:
                     continue
-                # Catch raw camera commands from laptop and drop them in the mailbox
-                raw_str = line.decode('utf-8', errors='ignore').strip()
-                if raw_str == "CMD:VISION_START":
-                    with open("/tmp/vision_cmd.txt", "w") as f: f.write("START")
-                    continue
-                elif raw_str == "CMD:VISION_STOP":
-                    with open("/tmp/vision_cmd.txt", "w") as f: f.write("STOP")
-                    continue
-                elif raw_str.startswith("CMD:MODEL,"):
-                    new_model = raw_str.split(",")[1]
-                    with open("/tmp/vision_cmd.txt", "w") as f: f.write(f"MODEL,{new_model}")
-                    continue
-               
+
                 msg = decode_message(line)
                 self.last_rx = time.time()
                 typ = msg.get("type")
@@ -65,6 +71,24 @@ class RadioBridge:
                 elif typ == "EVENT":
                     self.events.append({"time": self.last_rx, **payload})
                     self.events = self.events[-100:]
+                elif typ == "TARGET":
+                    try:
+                        pid = str(payload["pid"])
+                        lat, lon = float(payload["lat"]), float(payload["lon"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if pid not in self.detected_targets:
+                        self._log_event(f"New target {pid} at {lat:.6f}, {lon:.6f}")
+                    self.detected_targets[pid] = {"lat": lat, "lon": lon, "time": self.last_rx}
+            except serial.SerialException as exc:
+                if self.running:
+                    self._log_event(f"Ground radio lost: {exc}")
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
+                    self.serial = None
+                    time.sleep(1)
             except Exception as exc:
                 if self.running:
                     self.events.append({"time": time.time(), "message": f"Radio receive error: {exc}"})

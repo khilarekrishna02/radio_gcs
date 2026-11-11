@@ -25,13 +25,37 @@ class RadioBridge:
         self.last_error = None
         self.events = []
         self.response_cache = {}
+        self.vision_thread = None   # set by surveillance_loop once the Geotagger exists
+
+    @property
+    def port_open(self):
+        ser = self.serial
+        return bool(ser and ser.is_open)
+
+    def _open_serial(self):
+        ser = serial.Serial(config.RADIO_PORT, config.RADIO_BAUD, timeout=0.25, write_timeout=3)
+        self.serial = ser
+        print(f"[OK] Pi SiK radio opened on {config.RADIO_PORT} @ {config.RADIO_BAUD}")
+
+    def _drop_serial(self):
+        ser, self.serial = self.serial, None
+        if ser is not None:
+            try:
+                ser.close()
+            except Exception:
+                pass
 
     def start(self):
         if self.running.is_set():
             return
         os.makedirs(config.MISSION_DIR, exist_ok=True)
-        self.serial = serial.Serial(config.RADIO_PORT, config.RADIO_BAUD, timeout=0.25, write_timeout=3)
         self.running.set()
+        try:
+            self._open_serial()
+        except Exception as exc:
+            # Not fatal: _reader keeps retrying, so the radio can be plugged in late or re-plugged.
+            self.last_error = str(exc)
+            print(f"[WARN] Pi SiK radio {config.RADIO_PORT} not open yet: {exc}")
         self.reader_thread = threading.Thread(target=self._reader, daemon=True, name="sik-reader")
         self.telemetry_thread = threading.Thread(target=self._telemetry_sender, daemon=True, name="telemetry-sender")
         self.reader_thread.start()
@@ -39,16 +63,26 @@ class RadioBridge:
 
     def stop(self):
         self.running.clear()
-        if self.serial:
-            self.serial.close()
+        self._drop_serial()
 
     def send(self, message_type, payload=None, request_id=None):
-        if not self.serial or not self.serial.is_open:
+        ser = self.serial
+        if not ser or not ser.is_open:
             raise RuntimeError("Pi SiK radio is not open")
         raw = encode_message(message_type, payload, request_id)
         with self.write_lock:
-            self.serial.write(raw)
-            self.serial.flush()
+            ser.write(raw)
+            ser.flush()
+
+    def send_target(self, pid, lat, lon):
+        """Push a geotagged target to the laptop GCS. Returns True if it was written."""
+        try:
+            self.send("TARGET", {"pid": int(pid), "lat": round(float(lat), 7),
+                                 "lon": round(float(lon), 7), "time": time.time()})
+            return True
+        except Exception as exc:
+            self.last_error = str(exc)
+            return False
 
     def _response(self, request_id, ok, message, data=None):
         self.send("RESPONSE", {"ok": bool(ok), "message": str(message), "data": data or {}}, request_id)
@@ -72,26 +106,20 @@ class RadioBridge:
 
     def _reader(self):
         while self.running.is_set():
+            # Reopen the radio whenever it is missing (boot order, USB unplug, brown-out).
+            ser = self.serial
+            if ser is None or not ser.is_open:
+                try:
+                    self._open_serial()
+                except Exception as exc:
+                    self.last_error = str(exc)
+                    time.sleep(2)
+                continue
             try:
-                line = self.serial.readline()
+                line = ser.readline()
                 if not line:
                     continue
-                                    # Catch raw camera commands from laptop
-                raw_str = line.decode('utf-8', errors='ignore').strip()
-                if raw_str == "CMD:VISION_START":
-                    if hasattr(self, 'vision_thread'):
-                            self.vision_thread.start_camera()
-                        continue
-                elif raw_str == "CMD:VISION_STOP":
-                    if hasattr(self, 'vision_thread'):
-                            self.vision_thread.stop_camera()
-                        continue
-                elif raw_str.startswith("CMD:MODEL,"):
-                    new_model = raw_str.split(",")[1]
-                    if hasattr(self, 'vision_thread'):
-                            self.vision_thread.load_model(new_model)
-                        continue
-                        
+
                 msg = decode_message(line)
                 request_id = msg.get("request_id")
                 payload = msg.get("payload") or {}
@@ -110,6 +138,10 @@ class RadioBridge:
                     response = {"ok": False, "message": str(exc), "data": {}}
                     self._cache_response(request_id, response)
                     self.send("RESPONSE", response, request_id)
+            except serial.SerialException as exc:
+                self.last_error = f"Radio serial error: {exc}"
+                self._drop_serial()
+                time.sleep(1)
             except Exception as exc:
                 if self.running.is_set():
                     self.last_error = str(exc)
@@ -190,12 +222,36 @@ class RadioBridge:
                 raise PermissionError("Operator confirmation is required")
             result = self.pixhawk.start_mission()
             return result, "Mission start sequence completed"
+        if kind in ("VISION_START", "VISION_STOP"):
+            vision = self.vision_thread
+            if vision is None:
+                raise RuntimeError("Vision pipeline is not running on the drone")
+            if kind == "VISION_START":
+                vision.start_camera()
+            else:
+                vision.stop_camera()
+            return {"camera_running": bool(vision.camera_running)}, \
+                   ("Camera started" if kind == "VISION_START" else "Camera stopped")
+        if kind == "VISION_MODEL":
+            vision = self.vision_thread
+            if vision is None:
+                raise RuntimeError("Vision pipeline is not running on the drone")
+            name = os.path.basename(str(p.get("model", "")))
+            if not name.endswith(".pt"):
+                raise ValueError("Model must be a .pt file")
+            vision.load_model(name)
+            return {"model": name}, f"Model switched to {name}"
         raise ValueError(f"Unsupported message type: {kind}")
 
     def _telemetry_sender(self):
         while self.running.is_set():
             try:
-                self.send("TELEMETRY", dict(self.pixhawk.telemetry))
+                payload = dict(self.pixhawk.telemetry)
+                vision = self.vision_thread
+                if vision is not None:
+                    payload["vision"] = {"camera_running": bool(vision.camera_running),
+                                         "model": getattr(vision, "model_name", None)}
+                self.send("TELEMETRY", payload)
             except Exception as exc:
                 self.last_error = str(exc)
             time.sleep(config.TELEMETRY_PERIOD)

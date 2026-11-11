@@ -211,6 +211,28 @@
                     <span class="pill" style="border-color: var(--amber); color: var(--amber)">GCS ACTIVE</span>
                 </div>
                 <div id="map" style="height: 420px; border-radius: 12px; background: #0b1525; border: 1px solid #22334c; z-index: 1;"></div>
+                <div class="actions" style="margin-top: 12px;">
+                    <button class="btn primary" id="mode-point-btn">Map click: pick a point</button>
+                    <button class="btn" id="mode-gcs-btn">Set laptop position on map</button>
+                    <button class="btn" id="gcs-browser-btn">Use browser location</button>
+                </div>
+                <div class="fields" style="margin-top: 12px;">
+                    <div class="field full">
+                        <label for="gcs-height">Laptop height above the drone's launch point (m) &mdash; used for the straight-line (slant) distance</label>
+                        <input id="gcs-height" type="number" step="0.5" value="0">
+                    </div>
+                </div>
+                <div class="telemetry" style="margin-top: 12px; grid-template-columns: repeat(4, minmax(0, 1fr));">
+                    <div class="metric"><div class="label">DRONE &harr; LAPTOP &middot; GROUND</div><div class="value" id="dl-ground">&mdash;</div></div>
+                    <div class="metric"><div class="label">DRONE &harr; LAPTOP &middot; STRAIGHT-LINE</div><div class="value" id="dl-slant">&mdash;</div></div>
+                    <div class="metric"><div class="label">LAPTOP POSITION</div><div class="value" id="gcs-source" style="font-size:13px">Waiting for location…</div></div>
+                    <div class="metric"><div class="label">DRONE HEIGHT USED</div><div class="value" id="dl-alt">&mdash;</div></div>
+                    <div class="metric"><div class="label">POINT &harr; DRONE &middot; GROUND</div><div class="value" id="pt-ground">&mdash;</div></div>
+                    <div class="metric"><div class="label">POINT &harr; DRONE &middot; STRAIGHT-LINE</div><div class="value" id="pt-slant">&mdash;</div></div>
+                    <div class="metric"><div class="label">POINT &harr; LAPTOP &middot; GROUND</div><div class="value" id="pt-laptop">&mdash;</div></div>
+                    <div class="metric"><div class="label">SELECTED POINT</div><div class="value" id="pt-coords" style="font-size:13px">Click the map</div></div>
+                </div>
+                <div class="notice">Ground = distance along the earth's surface. Straight-line = the hypotenuse including the height difference (drone height above its launch point; the laptop and any picked point are assumed at launch level unless you enter a laptop height). A browser location is usually Wi-Fi/IP based and can be off by tens to hundreds of metres &mdash; for accurate laptop distances use &ldquo;Set laptop position on map&rdquo;.</div>
                 <div id="target-distances" style="margin-top: 15px; display: grid; gap: 8px;"></div>
             </section>
 
@@ -224,6 +246,17 @@
                     <span class="pill">OPERATOR CONTROL</span>
                 </div>
                 
+                <div class="step" style="margin-bottom: 12px; border-color: #27866b;">
+                    <div class="num">&#9733;</div>
+                    <div>
+                        <strong>Execute mission (one click)</strong>
+                        <small id="execute-step">Link check &rarr; send file &rarr; upload &rarr; start camera &rarr; arm &rarr; AUTO. Idle.</small>
+                    </div>
+                    <div style="margin-left: auto;">
+                        <button class="btn green" id="execute-btn" disabled>Execute mission</button>
+                    </div>
+                </div>
+
                 <div class="workflow">
                     <div class="step">
                         <div class="num">1</div>
@@ -274,6 +307,7 @@
             <div class="muted">Jetson camera & YOLO model control.</div>
         </div>
     </div>
+    <div class="statusline" style="margin: 0 0 14px 0;"><span id="vision-state">Active model on drone: unknown (waiting for telemetry)</span></div>
     <div class="fields" style="margin-bottom: 15px;">
         <div class="field full">
             <label for="vision-model">Detection Model</label>
@@ -293,16 +327,16 @@
 <section class="panel" style="grid-column: 1 / -1;">
     <div class="section-head">
         <div>
-            <h2>06 / Manual Distance Calculator</h2>
-            <div class="muted">Calculates 3D hypotenuse/slant distance from the drone's live telemetry.</div>
+            <h2>06 / Distance to a point</h2>
+            <div class="muted">Type coordinates (or click the map above). Shows the ground distance and the straight-line (hypotenuse) distance from the drone's live position.</div>
         </div>
     </div>
     <div class="d-flex gap-2 mb-2" style="display: flex; gap: 10px;">
-        <input type="number" id="manual-lat" placeholder="Target Latitude (e.g. 18.5204)">
-        <input type="number" id="manual-lon" placeholder="Target Longitude (e.g. 73.8567)">
+        <input type="number" step="any" id="manual-lat" placeholder="Point latitude (e.g. 18.5204)">
+        <input type="number" step="any" id="manual-lon" placeholder="Point longitude (e.g. 73.8567)">
         <button class="btn primary" onclick="calculateManualDistance()">Calculate</button>
     </div>
-    <div style="margin-top: 15px;">Distance from Drone: <strong id="calc-result" style="color: var(--amber);">-- meters</strong></div>
+    <div style="margin-top: 15px;">Drone &rarr; point: <strong id="calc-result" style="color: var(--amber);">-- ground / -- straight-line</strong></div>
 </section>
             
         </div>
@@ -312,7 +346,9 @@
 
     <script>
         const $ = id => document.getElementById(id);
-        let generated = false, sent = false, uploaded = false;
+        let generated = false, sent = false, uploaded = false, executing = false, linkAlive = false;
+        // distance-tool state (declared here because poll() starts before the map code runs)
+        let lastTel = {}, lastTargets = {}, gcsCoords = null, gcsMode = 'browser', clickMode = 'point', selectedPoint = null;
 
         function toast(message, kind = 'success') {
             const el = $('toast');
@@ -332,6 +368,7 @@
             $('send-btn').disabled = !generated;
             $('upload-btn').disabled = !sent;
             $('start-btn').disabled = !uploaded;
+            $('execute-btn').disabled = !generated || executing || !linkAlive;
         }
 
         $('planner').addEventListener('submit', async e => {
@@ -444,6 +481,52 @@
             }
         });
 
+        $('execute-btn').addEventListener('click', async () => {
+            if (!confirm('EXECUTE MISSION: this will send the mission, upload it to the Pixhawk, start the camera, ARM and fly it in AUTO.\n\nConfirm the aircraft is in a safe, clear flight area, GPS is valid, the path is verified, battery and failsafes are checked, and you are ready to abort.')) return;
+            executing = true;
+            updateButtons();
+            toast('Starting mission sequence…');
+            try {
+                await api('/api/execute-mission', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirmed: true })
+                });
+                pollExecute();
+            } catch (err) {
+                executing = false;
+                updateButtons();
+                toast(err.message, 'error');
+            }
+        });
+
+        async function pollExecute() {
+            try {
+                const s = await api('/api/execute-status');
+                if (s.running) {
+                    executing = true;
+                    $('execute-step').textContent = s.step + '…';
+                    updateButtons();
+                    setTimeout(pollExecute, 1000);
+                    return;
+                }
+                const wasExecuting = executing;
+                executing = false;
+                updateButtons();
+                if (s.failure) {
+                    $('execute-step').textContent = 'FAILED — ' + s.failure;
+                    toast(s.failure, 'error');
+                } else if (s.done) {
+                    sent = true; uploaded = true;
+                    $('execute-step').textContent = 'Mission running.';
+                    $('mission-summary').textContent = 'Mission uploaded, armed and started.';
+                    if (wasExecuting) toast('Mission running.');
+                }
+            } catch (err) {
+                setTimeout(pollExecute, 2000);
+            }
+        }
+
         function showNum(id, v, digits = 6) {
             $(id).textContent = v === null || v === undefined ? '—' : typeof v === 'number' ? v.toFixed(digits) : v;
         }
@@ -452,6 +535,7 @@
             try {
                 const d = await api('/api/status');
                 const t = d.telemetry || {};
+                lastTel = t;
                 const age = t.last_update ? Math.max(0, Math.round(Date.now() / 1000 - t.last_update)) : null;
                 
                 showNum('lat', t.lat, 6);
@@ -465,11 +549,20 @@
                 $('status').textContent = t.status || 'Waiting…';
                 $('telemetry-age').textContent = age === null ? 'NO DATA' : age + 's AGO';
                 
-                $('radio-status').textContent = d.radio_running ? `Ground radio open · ${d.radio_port}` : (d.radio_error || 'Radio disconnected');
-                $('radio-dot').className = 'dot ' + (d.radio_running ? 'ok' : 'bad');
-                $('link-pill').textContent = d.radio_running ? 'RADIO LINK · OPEN' : 'RADIO LINK · OFFLINE';
+                const portOpen = d.port_open ?? d.radio_running;
+                const droneAlive = d.link_age !== null && d.link_age !== undefined && d.link_age < 6;
+                linkAlive = !!(portOpen && droneAlive);
+                $('radio-status').textContent = !portOpen
+                    ? (d.radio_error || 'Ground radio not connected — retrying…')
+                    : (droneAlive ? `Ground radio open · ${d.radio_port} · drone link alive`
+                                  : `Ground radio open · ${d.radio_port} · waiting for drone…`);
+                $('radio-dot').className = 'dot ' + (linkAlive ? 'ok' : 'bad');
+                $('link-pill').textContent = linkAlive ? 'DRONE LINK · ALIVE' : (portOpen ? 'RADIO OPEN · NO DRONE' : 'RADIO LINK · OFFLINE');
+                updateButtons();
                 
                 $('event-log').textContent = (d.events || []).slice(-8).map(e => new Date(e.time * 1000).toLocaleTimeString() + '  ' + (e.message || 'event')).join('\n') || 'No events yet.';
+                if (t.vision && window.syncVisionUi) window.syncVisionUi(t.vision);
+                if (typeof updateDistances === 'function') updateDistances();
             } catch (err) {
                 $('radio-status').textContent = 'Website backend unavailable';
                 $('radio-dot').className = 'dot bad';
@@ -479,6 +572,7 @@
         
         poll();
         updateButtons();
+        pollExecute();   // pick up a sequence that is already running after a page reload
 
         /* =========================================
            LEAFLET MAP & TACTICAL TRACKING LOGIC
@@ -490,40 +584,160 @@
         const pinOpts = (char) => ({ className: 'map-pin', html: char, iconSize: [24,24] });
         let droneMarker = L.marker([0, 0], {icon: L.divIcon(pinOpts('🚁'))}).addTo(map);
         let targetMarkers = {};
-        let gcsCoords = null; 
+        let gcsMarker = null, pointMarker = null, geoWatchId = null;
 
-        navigator.geolocation.getCurrentPosition(pos => {
-            gcsCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-            L.marker([gcsCoords.lat, gcsCoords.lon], {icon: L.divIcon(pinOpts('💻'))})
-             .addTo(map).bindPopup("Command Center").openPopup();
-            map.setView([gcsCoords.lat, gcsCoords.lon], 18);
+        /* ---------- distance maths ---------- */
+        const R_EARTH = 6371008.8;   // mean earth radius (m)
+        function haversine(lat1, lon1, lat2, lon2) {          // ground distance, metres
+            const p = Math.PI / 180;
+            const a = Math.sin((lat2 - lat1) * p / 2) ** 2 +
+                      Math.cos(lat1 * p) * Math.cos(lat2 * p) * Math.sin((lon2 - lon1) * p / 2) ** 2;
+            return 2 * R_EARTH * Math.asin(Math.min(1, Math.sqrt(a)));
+        }
+        function fmtM(m) {
+            if (m === null || m === undefined || !isFinite(m)) return '—';
+            return m >= 1000 ? (m / 1000).toFixed(2) + ' km' : m.toFixed(1) + ' m';
+        }
+        function gcsHeight() { const v = parseFloat($('gcs-height').value); return isNaN(v) ? 0 : v; }
+        function droneReady() {
+            return typeof lastTel.lat === 'number' && typeof lastTel.lon === 'number' &&
+                   typeof lastTel.alt === 'number' && !(lastTel.lat === 0 && lastTel.lon === 0);
+        }
+        // Drone -> a spot at height h (m above the drone's launch point).
+        // ground = along the surface, slant = hypotenuse(ground, height difference).
+        function fromDrone(lat, lon, h) {
+            const ground = haversine(lastTel.lat, lastTel.lon, lat, lon);
+            return { ground, slant: Math.hypot(ground, lastTel.alt - h) };
+        }
+
+        /* ---------- laptop (GCS) position ---------- */
+        function setGcs(lat, lon, acc, source) {
+            const first = !gcsCoords;
+            gcsCoords = { lat, lon, acc, source };
+            if (!gcsMarker) {
+                gcsMarker = L.marker([lat, lon], {icon: L.divIcon(pinOpts('💻'))}).addTo(map).bindPopup("Command Center");
+            } else {
+                gcsMarker.setLatLng([lat, lon]);
+            }
+            if (first) map.setView([lat, lon], 18);
+            updateDistances();
+        }
+        function startBrowserLocation() {
+            gcsMode = 'browser';
+            if (!navigator.geolocation) {
+                $('gcs-source').textContent = 'No browser location — click the map to set it';
+                return;
+            }
+            if (geoWatchId !== null) navigator.geolocation.clearWatch(geoWatchId);
+            geoWatchId = navigator.geolocation.watchPosition(
+                pos => { if (gcsMode === 'browser') setGcs(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, 'browser'); },
+                err => { if (gcsMode === 'browser') $('gcs-source').textContent = 'Browser location unavailable — click the map to set it'; },
+                { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+        }
+
+        /* ---------- picked point ---------- */
+        function setPoint(lat, lon) {
+            selectedPoint = { lat, lon };
+            $('manual-lat').value = lat.toFixed(6);
+            $('manual-lon').value = lon.toFixed(6);
+            if (!pointMarker) {
+                pointMarker = L.marker([lat, lon], {icon: L.divIcon(pinOpts('📍'))}).addTo(map);
+            } else {
+                pointMarker.setLatLng([lat, lon]);
+            }
+            updateDistances();
+        }
+
+        function updateModeButtons() {
+            $('mode-point-btn').className = 'btn' + (clickMode === 'point' ? ' primary' : '');
+            $('mode-gcs-btn').className = 'btn' + (clickMode === 'gcs' ? ' warn' : '');
+            $('mode-gcs-btn').textContent = clickMode === 'gcs' ? 'Click the map now…' : 'Set laptop position on map';
+        }
+        $('mode-point-btn').addEventListener('click', () => { clickMode = 'point'; updateModeButtons(); });
+        $('mode-gcs-btn').addEventListener('click', () => { clickMode = 'gcs'; updateModeButtons(); });
+        $('gcs-browser-btn').addEventListener('click', () => { startBrowserLocation(); });
+        $('gcs-height').addEventListener('input', () => updateDistances());
+
+        map.on('click', e => {
+            if (clickMode === 'gcs') {
+                gcsMode = 'manual';
+                setGcs(e.latlng.lat, e.latlng.lng, null, 'manual');
+                clickMode = 'point';
+                updateModeButtons();
+            } else {
+                setPoint(e.latlng.lat, e.latlng.lng);
+            }
         });
 
-        function getDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371e3, p = Math.PI / 180;
-            const a = 0.5 - Math.cos((lat2 - lat1) * p) / 2 + Math.cos(lat1 * p) * Math.cos(lat2 * p) * (1 - Math.cos((lon2 - lon1) * p)) / 2;
-            return (R * 2 * Math.asin(Math.sqrt(a))).toFixed(1);
+        /* ---------- readouts (refreshed on every telemetry poll) ---------- */
+        function updateDistances() {
+            const ready = droneReady();
+            const dash = '—';
+
+            if (gcsCoords && ready) {
+                const d = fromDrone(gcsCoords.lat, gcsCoords.lon, gcsHeight());
+                $('dl-ground').textContent = fmtM(d.ground);
+                $('dl-slant').textContent = fmtM(d.slant);
+            } else {
+                $('dl-ground').textContent = dash;
+                $('dl-slant').textContent = dash;
+            }
+            $('gcs-source').textContent = !gcsCoords ? 'Waiting for location…'
+                : (gcsCoords.source === 'manual' ? 'Set on map'
+                   : 'Browser' + (gcsCoords.acc !== null && gcsCoords.acc !== undefined ? ` · ±${Math.round(gcsCoords.acc)} m` : ''));
+            $('dl-alt').textContent = ready ? lastTel.alt.toFixed(1) + ' m' : dash;
+
+            if (selectedPoint) {
+                $('pt-coords').textContent = `${selectedPoint.lat.toFixed(6)}, ${selectedPoint.lon.toFixed(6)}`;
+                if (ready) {
+                    const d = fromDrone(selectedPoint.lat, selectedPoint.lon, 0);
+                    $('pt-ground').textContent = fmtM(d.ground);
+                    $('pt-slant').textContent = fmtM(d.slant);
+                    $('calc-result').textContent = `${fmtM(d.ground)} ground / ${fmtM(d.slant)} straight-line`;
+                } else {
+                    $('pt-ground').textContent = dash;
+                    $('pt-slant').textContent = dash;
+                    $('calc-result').textContent = 'Waiting for live drone telemetry';
+                }
+                $('pt-laptop').textContent = gcsCoords
+                    ? fmtM(haversine(gcsCoords.lat, gcsCoords.lon, selectedPoint.lat, selectedPoint.lon)) : dash;
+            }
+            renderTargetList();
+        }
+
+        function renderTargetList() {
+            const ready = droneReady();
+            let html = '';
+            for (const [pid, c] of Object.entries(lastTargets)) {
+                const parts = [];
+                if (ready) {
+                    const d = fromDrone(c.lat, c.lon, 0);
+                    parts.push(`Drone: ground ${fmtM(d.ground)} · straight-line ${fmtM(d.slant)}`);
+                }
+                if (gcsCoords) parts.push(`Laptop: ${fmtM(haversine(gcsCoords.lat, gcsCoords.lon, c.lat, c.lon))}`);
+                html += `<div class="statusline" style="border-color:var(--amber)">🚨 <strong>Target ${pid}</strong>: ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)} <span style="margin-left:auto; color:var(--amber)">${parts.join(' &nbsp;|&nbsp; ') || 'Waiting for GPS...'}</span></div>`;
+            }
+            $('target-distances').innerHTML = html || "<div class='notice'>Scanning for targets...</div>";
         }
 
         async function pollTargets() {
             try {
                 const d = await api('/api/targets');
-                let distHTML = "";
                 for (const [pid, coords] of Object.entries(d)) {
                     if (!targetMarkers[pid]) {
                         targetMarkers[pid] = L.marker([coords.lat, coords.lon], {icon: L.divIcon(pinOpts('🚨'))}).addTo(map);
                     } else {
                         targetMarkers[pid].setLatLng([coords.lat, coords.lon]);
                     }
-                    
-                    let dist = gcsCoords ? getDistance(gcsCoords.lat, gcsCoords.lon, coords.lat, coords.lon) + "m" : "Waiting for GPS...";
-                    distHTML += `<div class="statusline" style="border-color:var(--amber)">🚨 <strong>Target ${pid}</strong>: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)} <span style="margin-left:auto; color:var(--amber)">${dist} from Laptop</span></div>`;
                 }
-                $('target-distances').innerHTML = distHTML || "<div class='notice'>Scanning for targets...</div>";
+                lastTargets = d;
+                renderTargetList();
             } catch (e) {}
             setTimeout(pollTargets, 1500);
         }
         pollTargets();
+        startBrowserLocation();
+        updateModeButtons();
 
         setInterval(() => {
             let lat = parseFloat($('lat').innerText);
@@ -533,34 +747,6 @@
             }
         }, 1200);
 
-        let camActive = false;
-$('cam-toggle-btn').addEventListener('click', async () => {
-    const b = $('cam-toggle-btn');
-    b.disabled = true;
-    const action = camActive ? 'stop' : 'start';
-    toast(`Sending camera ${action} command...`);
-    try {
-        const d = await api(`/api/vision/${action}`, { method: 'POST' });
-        camActive = !camActive;
-        b.textContent = camActive ? 'Stop Camera' : 'Start Camera';
-        b.className = camActive ? 'btn warn' : 'btn primary';
-        toast(d.message);
-    } catch (err) { toast(err.message, 'error'); } 
-    finally { b.disabled = false; }
-});
-
-$('model-update-btn').addEventListener('click', async () => {
-    const b = $('model-update-btn');
-    const model = $('vision-model').value;
-    b.disabled = true;
-    try {
-        const formData = new FormData();
-        formData.append('model', model);
-        const d = await api('/api/vision/model', { method: 'POST', body: formData });
-        toast(`Model updated to ${model}`);
-    } catch (err) { toast(err.message, 'error'); } 
-    finally { b.disabled = false; }
-});
         
     </script>
 <script>
@@ -569,9 +755,26 @@ $('model-update-btn').addEventListener('click', async () => {
         const camToggleBtn = $('cam-toggle-btn');
         const modelUpdateBtn = $('model-update-btn');
         const modelSelect = $('vision-model');
+        let lastCamToggle = 0, lastModelSet = 0, modelTouched = false;
+        modelSelect.addEventListener('change', () => { modelTouched = true; });
+
+        // Called from poll() with the drone's real camera/model state (sent in TELEMETRY).
+        window.syncVisionUi = function (v) {
+            $('vision-state').textContent = `Active model on drone: ${v.model || 'unknown'} · camera ${v.camera_running ? 'RUNNING' : 'STOPPED'}`;
+            if (Date.now() - lastCamToggle > 4000) {
+                isCameraRunning = !!v.camera_running;
+                camToggleBtn.textContent = isCameraRunning ? 'Stop Camera' : 'Start Camera';
+                camToggleBtn.className = isCameraRunning ? 'btn warn' : 'btn primary';
+            }
+            if (!modelTouched && Date.now() - lastModelSet > 4000 && v.model &&
+                [...modelSelect.options].some(o => o.value === v.model)) {
+                modelSelect.value = v.model;
+            }
+        };
 
         camToggleBtn.addEventListener('click', async () => {
             camToggleBtn.disabled = true;
+            lastCamToggle = Date.now();
             isCameraRunning = !isCameraRunning;
             const action = isCameraRunning ? "start" : "stop";
             
@@ -598,7 +801,8 @@ $('model-update-btn').addEventListener('click', async () => {
                 const formData = new FormData();
                 formData.append('model', selectedModel);
                 const d = await api('/api/vision/model', { method: 'POST', body: formData });
-                toast(`Model updated to ${selectedModel}`);
+                modelTouched = false; lastModelSet = Date.now();
+                toast(d.message || `Model updated to ${selectedModel}`);
             } catch (err) { 
                 toast(err.message, 'error'); 
             } finally { 
@@ -608,35 +812,15 @@ $('model-update-btn').addEventListener('click', async () => {
 
         // ================= MANUAL DISTANCE CALCULATOR =================
         window.calculateManualDistance = function() {
-            const targetLat = parseFloat($('manual-lat').value);
-            const targetLon = parseFloat($('manual-lon').value);
-            
-            const droneLat = parseFloat($('lat').innerText);
-            const droneLon = parseFloat($('lon').innerText);
-            const droneAlt = parseFloat($('alt').innerText);
-
-            if (isNaN(targetLat) || isNaN(targetLon)) {
-                alert("Please enter valid target coordinates.");
+            const lat = parseFloat($('manual-lat').value);
+            const lon = parseFloat($('manual-lon').value);
+            if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+                alert("Please enter valid point coordinates.");
                 return;
             }
-            if (isNaN(droneLat) || isNaN(droneLon) || isNaN(droneAlt)) {
-                alert("Waiting for live drone telemetry. Cannot calculate yet!");
-                return;
-            }
-
-            const R = 6371e3; 
-            const p1 = droneLat * Math.PI/180, p2 = targetLat * Math.PI/180;
-            const dp = (targetLat-droneLat) * Math.PI/180;
-            const dl = (targetLon-droneLon) * Math.PI/180;
-
-            const a = Math.sin(dp/2) * Math.sin(dp/2) + 
-                      Math.cos(p1) * Math.cos(p2) * 
-                      Math.sin(dl/2) * Math.sin(dl/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            const groundDistance = R * c; 
-
-            const slantDistance = Math.sqrt(Math.pow(groundDistance, 2) + Math.pow(droneAlt, 2));
-            $('calc-result').innerText = Math.round(slantDistance) + " meters (Slant)";
+            setPoint(lat, lon);
+            map.panTo([lat, lon]);
+            if (!droneReady()) alert("Waiting for live drone telemetry. The result will appear as soon as the drone's position arrives.");
         };
     </script>
 </body>

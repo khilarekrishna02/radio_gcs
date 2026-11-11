@@ -14,8 +14,8 @@ running = threading.Event()
 running.set()
 telemetry_thread = threading.Thread(target=pixhawk.telemetry_loop, args=(running,), daemon=True, name="pixhawk-telemetry")
 radio = RadioBridge(pixhawk)
+surveillance_thread = threading.Thread(target=surveillance_loop, args=(pixhawk, running, radio), daemon=True, name="vision-surveillance")
 started = False
-threading.Thread(target=surveillance_loop, args=(pixhawk, running, radio), daemon=True).start()
 
 
 def start_services():
@@ -26,17 +26,20 @@ def start_services():
     telemetry_thread.start()
     try:
         radio.start()
-        print(f"[OK] Pi SiK radio opened on {config.RADIO_PORT} @ {config.RADIO_BAUD}")
     except Exception as exc:
-        print(f"[ERROR] Could not open Pi SiK radio {config.RADIO_PORT}: {exc}")
-        raise
+        # The bridge keeps retrying the port in the background, so don't die at boot
+        # just because the radio was not enumerated yet.
+        print(f"[WARN] Pi SiK radio {config.RADIO_PORT} not ready ({exc}); retrying in background")
+    surveillance_thread.start()
     started = True
 
 
 @app.get("/health")
 def health():
     return jsonify({"ok": True, "radio_running": radio.running.is_set(), "radio_port": config.RADIO_PORT,
+                    "radio_port_open": radio.port_open,
                     "pixhawk_connected": pixhawk.connected, "pixhawk_port": config.PIXHAWK_PORT,
+                    "vision_running": getattr(radio, "vision_thread", None) is not None,
                     "mission_received": bool(radio.mission_path), "mission_uploaded": pixhawk.uploaded})
 
 
@@ -50,8 +53,6 @@ def mission_status():
     return jsonify({"received": bool(radio.mission_path), "uploaded": pixhawk.uploaded,
                     "mission_item_count": pixhawk.mission_item_count,
                     "filename": os.path.basename(radio.mission_path) if radio.mission_path else None})
-
-threading.Thread(target=surveillance_loop, args=(fc, running_event, radio), daemon=True).start()
 
 
 if __name__ == "__main__":
