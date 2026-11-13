@@ -2,7 +2,17 @@ import importlib.util
 import os
 import unittest
 
-RPI_PROTOCOL = os.path.join(os.path.dirname(__file__), "..", "rpi", "protocol.py")
+JETSON_PROTOCOL = os.path.join(
+    os.path.dirname(__file__), "..", "jetson", "protocol.py"
+)
+
+spec = importlib.util.spec_from_file_location(
+    "jetson_protocol_under_test", JETSON_PROTOCOL
+)
+jetson_protocol = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(jetson_protocol)
+
+parse_qgc_wpl = jetson_protocol.parse_qgc_wpl
 spec = importlib.util.spec_from_file_location("rpi_protocol_under_test", RPI_PROTOCOL)
 rpi_protocol = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rpi_protocol)
