@@ -6,7 +6,8 @@ After=network.target
 Type=simple
 User=jetson-arsc
 SupplementaryGroups=dialout video plugdev
-WorkingDirectory=/home/jetson-arsc/radio_gcs/rpi
+# Adjust this path to where you cloned the repo on the Jetson
+WorkingDirectory=/home/jetson-arsc/radio_gcs/jetson
 # Prefer the stable names from: ls -l /dev/serial/by-id/
 Environment=GCS_RADIO_PORT=/dev/ttyUSB0
 Environment=GCS_RADIO_BAUD=57600

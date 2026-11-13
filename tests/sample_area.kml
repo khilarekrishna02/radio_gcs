@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Home-test search area (about 210 m x 200 m, next to the fake drone)</name>
+    <Placemark>
+      <name>Search area</name>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              73.8566,18.5293,0 73.8586,18.5293,0 73.8586,18.5311,0 73.8566,18.5311,0 73.8566,18.5293,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  </Document>
+</kml>
