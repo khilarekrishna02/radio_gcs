@@ -7,6 +7,8 @@
 
 It only reads and reports; it never changes anything. Exit code 0 = no failures.
 """
+
+
 import argparse
 import warnings
 import glob
@@ -17,6 +19,14 @@ import shutil
 import subprocess
 import sys
 import time
+
+import sys
+import os
+
+# Force Python to look inside your specific subfolders for imports
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(BASE_DIR, "laptop"))
+sys.path.append(os.path.join(BASE_DIR, "laptop"))
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
@@ -103,7 +113,8 @@ def check_ports_and_config():
 
 def check_files():
     section("Files")
-    for name in ("bestest.pt", "yolov8n.pt", "yolov8s.pt"):
+    
+    for name in ("models/bestest.pt", "models/yolov8n.pt", "models/yolov8s.pt"):
         if os.path.isfile(name):
             ok(f"{name} present ({os.path.getsize(name) / 1e6:.1f} MB)")
         else:
