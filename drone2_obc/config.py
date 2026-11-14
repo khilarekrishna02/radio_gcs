@@ -1,5 +1,7 @@
 import os
 
+AUTO_DETECT_PORTS = os.getenv("GCS_AUTO_DETECT_PORTS", "1").lower() not in ("0", "false", "no")
+
 RADIO_PORT = os.getenv("GCS_RADIO_PORT", "/dev/ttyUSB0")
 RADIO_BAUD = int(os.getenv("GCS_RADIO_BAUD", "57600"))
 # Set to /dev/ttyACM0 for USB, or /dev/serial0 for a properly configured UART adapter.
@@ -10,3 +12,4 @@ MISSION_DIR = os.getenv("GCS_MISSION_DIR", os.path.join(os.path.dirname(__file__
 RADIO_TIMEOUT = float(os.getenv("GCS_RADIO_TIMEOUT", "8"))
 TELEMETRY_PERIOD = float(os.getenv("GCS_TELEMETRY_PERIOD", "1.0"))
 LIDAR_ENABLED = os.getenv("LIDAR_ENABLED", "1").lower() not in ("0", "false", "no")
+

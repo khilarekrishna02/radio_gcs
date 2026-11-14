@@ -7,6 +7,10 @@ import time
 
 import serial
 import config
+try:
+    from port_detector import detect_radio_port
+except ImportError:
+    detect_radio_port = None
 
 from protocol import encode_message, decode_message, parse_qgc_wpl
 
@@ -41,12 +45,22 @@ class RadioBridge:
 
         os.makedirs(config.MISSION_DIR, exist_ok=True)
 
+        port = config.RADIO_PORT
+        if getattr(config, "AUTO_DETECT_PORTS", True) and detect_radio_port:
+            exclude = None
+            if self.pixhawk and getattr(self.pixhawk, "master", None):
+                exclude = getattr(self.pixhawk.master, "address", None)
+            detected = detect_radio_port(exclude_port=exclude, preferred_port=port)
+            if detected:
+                port = detected
+
         self.serial = serial.Serial(
-            config.RADIO_PORT,
+            port,
             config.RADIO_BAUD,
             timeout=0.25,
             write_timeout=3
         )
+
 
         self.running.set()
 
