@@ -20,3 +20,8 @@ env/
 # IDE files
 .vscode/
 .idea/
+
+*.pt 
+*.csv
+
+/radio_gcs/models/best/data*
