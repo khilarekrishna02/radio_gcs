@@ -39,12 +39,7 @@ class RadioBridge:
     # START / STOP
     # --------------------------------------------------
 
-    def start(self):
-        if self.running.is_set():
-            return
-
-        os.makedirs(config.MISSION_DIR, exist_ok=True)
-
+    def _open_serial(self):
         port = config.RADIO_PORT
         if getattr(config, "AUTO_DETECT_PORTS", True) and detect_radio_port:
             exclude = None
@@ -60,9 +55,28 @@ class RadioBridge:
             timeout=0.25,
             write_timeout=3
         )
+        print(f"Drone 2 SiK radio connected: {port}")
 
+    def _drop_serial(self):
+        ser, self.serial = self.serial, None
+        if ser is not None:
+            try:
+                ser.close()
+            except Exception:
+                pass
 
+    def start(self):
+        if self.running.is_set():
+            return
+
+        os.makedirs(config.MISSION_DIR, exist_ok=True)
         self.running.set()
+
+        try:
+            self._open_serial()
+        except Exception as exc:
+            self.last_error = str(exc)
+            print(f"[WARN] Drone 2 SiK radio {config.RADIO_PORT} not open yet: {exc}")
 
         self.reader_thread = threading.Thread(
             target=self._reader,
@@ -79,13 +93,10 @@ class RadioBridge:
         self.reader_thread.start()
         self.telemetry_thread.start()
 
-        print(f"Drone 2 SiK radio connected: {config.RADIO_PORT}")
-
     def stop(self):
         self.running.clear()
+        self._drop_serial()
 
-        if self.serial and self.serial.is_open:
-            self.serial.close()
 
     # --------------------------------------------------
     # MESSAGE SENDING
@@ -157,8 +168,16 @@ class RadioBridge:
 
     def _reader(self):
         while self.running.is_set():
+            ser = self.serial
+            if ser is None or not ser.is_open:
+                try:
+                    self._open_serial()
+                except Exception as exc:
+                    self.last_error = str(exc)
+                    time.sleep(2)
+                continue
             try:
-                line = self.serial.readline()
+                line = ser.readline()
 
                 if not line:
                     continue
@@ -209,10 +228,15 @@ class RadioBridge:
                         str(exc)
                     )
 
+            except serial.SerialException as exc:
+                self.last_error = f"Radio serial error: {exc}"
+                self._drop_serial()
+                time.sleep(1)
             except Exception as exc:
                 if self.running.is_set():
                     self.last_error = str(exc)
                     time.sleep(0.2)
+
 
     # --------------------------------------------------
     # COMMAND HANDLER

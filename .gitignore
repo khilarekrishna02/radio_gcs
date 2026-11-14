@@ -24,4 +24,7 @@ env/
 *.pt 
 *.csv
 
-/radio_gcs/models/best/data*
+./models/best/data*
+./laptop/__pycache__*
+./jetson/__pycache__*
+./drone2_obc/__pycache__*
