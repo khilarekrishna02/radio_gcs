@@ -18,6 +18,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
+
 warnings.simplefilter("ignore")
 fails = warns = 0
 
