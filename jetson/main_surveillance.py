@@ -7,8 +7,8 @@ import sys
 import os
 
 # Force Python to read config and modules ONLY from the jetson subfolder
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(1, os.path.join(BASE_DIR, "jetson"))
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(BASE_DIR, "jetson"))
 
 TARGET_SEND_PERIOD_S = 1.0       # max rate of TARGET messages per person
 TARGET_REBROADCAST_S = 10.0      # re-send every confirmed target now and then (radio drops packets)

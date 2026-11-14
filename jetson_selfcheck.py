@@ -23,12 +23,10 @@ import time
 import sys
 import os
 
-# Force Python to look inside your specific subfolders for imports
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(BASE_DIR, "laptop"))
-sys.path.append(os.path.join(BASE_DIR, "laptop"))
+# Force Python to look in the 'jetson' folder FIRST, ignoring the laptop folder
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(BASE_DIR, "jetson"))
 
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 
 warnings.simplefilter("ignore")
