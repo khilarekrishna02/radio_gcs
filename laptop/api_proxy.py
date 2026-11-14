@@ -6,6 +6,10 @@ import tempfile
 import threading
 from flask import Flask, jsonify, render_template, request, send_file
 import config
+try:
+    from port_detector import detect_radio_port
+except ImportError:
+    detect_radio_port = None
 from mission_planner import parse_kml_polygon, generate_reference_serpentine
 from radio_bridge import RadioBridge, list_serial_ports
 from route_optimizer import (
@@ -15,15 +19,28 @@ from route_optimizer import (
 )
 
 app = Flask(__name__, template_folder="templates")
+
+# Resolve auto-detected ports for bridges
+r1_port = config.RADIO_PORT
+r2_port = config.RADIO2_PORT
+if getattr(config, "AUTO_DETECT_PORTS", True) and detect_radio_port:
+    d1 = detect_radio_port(preferred_port=r1_port)
+    if d1:
+        r1_port = d1
+    d2 = detect_radio_port(exclude_ports=[r1_port], preferred_port=r2_port)
+    if d2:
+        r2_port = d2
+
 bridge = RadioBridge(
-    config.RADIO_PORT,
+    r1_port,
     config.RADIO_BAUD
 )                                  # bridge for drone 1
 
 drone2_bridge = RadioBridge(
-    config.RADIO2_PORT,
+    r2_port,
     config.RADIO2_BAUD
 )                                  # bridge for drone 2
+
 bridge_errors = {
     "drone1": None,
     "drone2": None

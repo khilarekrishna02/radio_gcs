@@ -3,12 +3,15 @@
 defines all of these names."""
 import os
 
+AUTO_DETECT_PORTS = os.getenv("GCS_AUTO_DETECT_PORTS", "1").lower() not in ("0", "false", "no")
+
 RADIO_PORT = os.getenv("GCS_RADIO_PORT", "/dev/ttyUSB0")
 RADIO_BAUD = int(os.getenv("GCS_RADIO_BAUD", "57600"))
 
 
 RADIO2_PORT = os.getenv("GCS_RADIO2_PORT", "COM12")  # drone 2
 RADIO2_BAUD = int(os.getenv("GCS_RADIO2_BAUD", "57600"))
+
 
 WEB_HOST = os.getenv("GCS_WEB_HOST", "127.0.0.1")
 WEB_PORT = int(os.getenv("GCS_WEB_PORT", "5000"))

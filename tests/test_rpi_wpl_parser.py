@@ -13,10 +13,7 @@ jetson_protocol = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(jetson_protocol)
 
 parse_qgc_wpl = jetson_protocol.parse_qgc_wpl
-spec = importlib.util.spec_from_file_location("rpi_protocol_under_test", RPI_PROTOCOL)
-rpi_protocol = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(rpi_protocol)
-parse_qgc_wpl = rpi_protocol.parse_qgc_wpl
+
 
 
 class QgcWplParserTests(unittest.TestCase):
