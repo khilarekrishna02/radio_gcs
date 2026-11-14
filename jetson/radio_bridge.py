@@ -263,7 +263,21 @@ class RadioBridge:
     def _telemetry_sender(self):
         while self.running.is_set():
             try:
-                payload = dict(self.pixhawk.telemetry)
+                t = dict(self.pixhawk.telemetry)
+                # Compact floats to reduce packet size over 57600 baud wireless radio
+                payload = {
+                    "lat": round(t["lat"], 7) if isinstance(t.get("lat"), (int, float)) else None,
+                    "lon": round(t["lon"], 7) if isinstance(t.get("lon"), (int, float)) else None,
+                    "alt": round(t["alt"], 2) if isinstance(t.get("alt"), (int, float)) else None,
+                    "mode": t.get("mode"),
+                    "armed": t.get("armed"),
+                    "status": t.get("status"),
+                    "groundspeed": round(t["groundspeed"], 2) if isinstance(t.get("groundspeed"), (int, float)) else None,
+                    "lidar_reading": t.get("lidar_reading"),
+                    "roll": round(t["roll"], 4) if isinstance(t.get("roll"), (int, float)) else 0.0,
+                    "pitch": round(t["pitch"], 4) if isinstance(t.get("pitch"), (int, float)) else 0.0,
+                    "yaw": round(t["yaw"], 4) if isinstance(t.get("yaw"), (int, float)) else 0.0,
+                }
                 vision = self.vision_thread
                 if vision is not None:
                     payload["vision"] = {"camera_running": bool(vision.camera_running),
@@ -272,3 +286,4 @@ class RadioBridge:
             except Exception as exc:
                 self.last_error = str(exc)
             time.sleep(config.TELEMETRY_PERIOD)
+

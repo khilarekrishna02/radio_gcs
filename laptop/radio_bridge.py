@@ -28,6 +28,10 @@ class RadioBridge:
         self.events = []
         self.detected_targets = {}
         self.last_rx = None
+        self._last_telem_log = 0.0
+        self._last_logged_mode = None
+        self._last_logged_armed = None
+
         
 
     @property
@@ -44,8 +48,10 @@ class RadioBridge:
             return
         self.serial = serial.serial_for_url(self.port, baudrate=self.baud, timeout=0.25, write_timeout=3)
         self.running = True
+        self._log_event(f"Ground radio opened on {self.port} @ {self.baud}")
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
+
 
     def stop(self):
         self.running = False
@@ -81,7 +87,31 @@ class RadioBridge:
                 if typ == "RESPONSE":
                     self.requests.resolve(msg.get("request_id"), payload)
                 elif typ == "TELEMETRY":
+                    first_telem = not self.telemetry.get("connected")
                     self.telemetry = {**payload, "connected": True, "last_update": self.last_rx}
+                    if first_telem:
+                        self._log_event(f"Drone link connected ({payload.get('mode', 'UNKNOWN')}, {payload.get('armed', 'DISARMED')})")
+
+                    # Log mode or arm state changes
+                    cur_mode = payload.get("mode")
+                    cur_armed = payload.get("armed")
+                    if cur_mode and cur_mode != self._last_logged_mode:
+                        if self._last_logged_mode is not None:
+                            self._log_event(f"Flight mode changed to {cur_mode}")
+                        self._last_logged_mode = cur_mode
+                    if cur_armed and cur_armed != self._last_logged_armed:
+                        if self._last_logged_armed is not None:
+                            self._log_event(f"Vehicle {cur_armed}")
+                        self._last_logged_armed = cur_armed
+
+                    # Periodic heartbeat log every 15s to keep feed fresh
+                    if self.last_rx - self._last_telem_log > 15.0:
+                        self._last_telem_log = self.last_rx
+                        lat, lon = payload.get("lat"), payload.get("lon")
+                        alt = payload.get("alt")
+                        pos_str = f"lat={lat:.5f}, lon={lon:.5f}, alt={alt}m" if lat is not None else "no GPS fix"
+                        self._log_event(f"Telemetry alive: {cur_mode} | {pos_str}")
+
                 elif typ == "EVENT":
                     self.events.append({"time": self.last_rx, **payload})
                     self.events = self.events[-100:]
@@ -104,9 +134,21 @@ class RadioBridge:
                     self.serial = None
                     time.sleep(1)
             except Exception as e:
-                if "Expecting value" in str(e) or "Extra data" in str(e):
-                 continue  # Silently skip garbage JSON packets
+                err_msg = str(e)
+                # Radio serial links drop occasional RF bytes/packets, leading to partial JSON lines.
+                # Skip normal partial-packet parse errors silently without spamming event log.
+                if any(x in err_msg for x in (
+                    "Expecting value",
+                    "Extra data",
+                    "Unterminated string",
+                    "Expecting ',' delimiter",
+                    "Expecting ':' delimiter",
+                    "Expecting property name",
+                    "Invalid control character"
+                )):
+                    continue
                 self._log_event(f"Radio receive error: {e}")
+
 
     
     
