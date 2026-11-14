@@ -133,7 +133,7 @@ class RadioBridge:
                     time.sleep(2)
                 continue
             try:
-                line = self._next_line(ser)
+                line = ser.readline()
                 if not line:
                     continue
 
