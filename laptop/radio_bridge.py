@@ -112,8 +112,8 @@ class RadioBridge:
                         self.events.append({"time": time.time(), "message": f"Ignored {self.bad_lines} unreadable radio line(s) so far (last: {exc})"})
                         self.events = self.events[-100:]
 
-        def _next_line(self, ser):
-          """One complete line (ending in a newline), or b"" if none has arrived yet.
+    def _next_line(self, ser):
+        """One complete line (ending in a newline), or b"" if none has arrived yet.
         Bytes are collected across reads, so a line the radio delivers in pieces is not cut in half."""
         chunk = ser.read(max(1, ser.in_waiting))
         if chunk:
@@ -126,6 +126,7 @@ class RadioBridge:
         line = bytes(self._rxbuf[:end + 1])
         del self._rxbuf[:end + 1]
         return line
+
     
     def _write(self, raw):
         if not self.serial or not self.serial.is_open:
