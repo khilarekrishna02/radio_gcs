@@ -22,7 +22,7 @@ def surveillance_loop(pixhawk_controller, running_event, radio_link):
     vision = None
     try:
         print("[INFO] Initializing Vision Pipeline (CUDA/RealSense)...")
-        vision = Geotagger(model_path="bestest.pt", conf_threshold=0.50)
+        vision = Geotagger(model_path="/home/jetson-arsc/radio_gcs/models/bestest.pt", conf_threshold=0.50)
 
         # Lets the radio bridge reach start/stop camera and model-swap commands.
         radio_link.vision_thread = vision
