@@ -4,12 +4,14 @@ import uuid
 import serial
 from serial.tools import list_ports
 import config
+from config import RADIO_PORT, RADIO_BAUD, RADIO_TIMEOUT
 from protocol import encode_message, decode_message
 from request_manager import RequestManager
 try:
     from port_detector import detect_radio_port
 except ImportError:
     detect_radio_port = None
+
 
 
 

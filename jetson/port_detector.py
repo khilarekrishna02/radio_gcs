@@ -27,22 +27,26 @@ except ImportError:
 
 logger = logging.getLogger("port_detector")
 
-# Known USB VID:PID or substrings
+# Pixhawk / Autopilot indicators:
+# Pixhawks often use STMicroelectronics native USB, CubePilot IDs, or FTDI/CP210x adapters connected to TELEM ports.
 PIXHAWK_IDENTIFIERS = [
     "pixhawk", "cube", "ardupilot", "px4", "fmu", "holybro", "cuav", "stm32",
+    "silicon_labs", "cp210", "cp2102", "cp2104",  # common UART bridge to Pixhawk TELEM
     "26ac:", # 3DR / Hex Cube
     "0483:5740", # STMicroelectronics Virtual COM Port
     "1209:5740", # Generic ArduPilot
     "3162:", # CUAV
+    "10c4:ea60", # Silicon Labs CP210x
 ]
 
+# Radio indicators:
 RADIO_IDENTIFIERS = [
-    "sik", "radio", "ft232", "cp210", "ch340", "ch341", "pl2303", "uart bridge",
+    "sik", "radio", "3dr_radio", "ft232", "ch340", "ch341", "pl2303", "uart bridge",
     "0403:6001", # FTDI FT232R
     "0403:6015", # FTDI FT231X
-    "10c4:ea60", # Silicon Labs CP210x
     "1a86:7523", # QinHeng CH340
 ]
+
 
 
 def list_candidate_ports():
@@ -82,21 +86,35 @@ def list_candidate_ports():
 
 
 def inspect_port_info(device_path):
-    """Gathers description, manufacturer, and VID:PID string for a device."""
-    desc = ""
-    mfg = ""
-    vid_pid = ""
-    hwid = ""
+    """Gathers device path, symlink targets, description, manufacturer, and VID:PID string."""
+    info_parts = [device_path]
+    try:
+        real = os.path.realpath(device_path)
+        if real != device_path:
+            info_parts.append(real)
+    except Exception:
+        pass
+
+    # Check by-id symlinks pointing to this device
+    try:
+        for by_id in glob.glob("/dev/serial/by-id/*"):
+            if os.path.realpath(by_id) == os.path.realpath(device_path):
+                info_parts.append(by_id)
+    except Exception:
+        pass
+
     if serial and hasattr(serial.tools, "list_ports"):
         for p in serial.tools.list_ports.comports():
             if p.device == device_path or os.path.realpath(p.device) == os.path.realpath(device_path):
-                desc = p.description or ""
-                mfg = p.manufacturer or ""
-                hwid = p.hwid or ""
+                if p.description: info_parts.append(p.description)
+                if p.manufacturer: info_parts.append(p.manufacturer)
+                if p.hwid: info_parts.append(p.hwid)
                 if p.vid is not None and p.pid is not None:
-                    vid_pid = f"{p.vid:04x}:{p.pid:04x}"
+                    info_parts.append(f"{p.vid:04x}:{p.pid:04x}")
                 break
-    return f"{desc} {mfg} {hwid} {vid_pid}".lower()
+
+    return " ".join(info_parts).lower()
+
 
 
 def probe_pixhawk_heartbeat(port, baud=57600, timeout=1.5):
@@ -167,25 +185,42 @@ def detect_radio_port(exclude_port=None, preferred_port=None):
     """
     Finds the Telemetry Radio port:
     1. Check GCS_RADIO_PORT env var if explicitly provided.
-    2. Candidate ports matching radio descriptors (excluding Pixhawk port).
-    3. Any remaining candidate port excluding Pixhawk port.
+    2. Exclude the Pixhawk port (and any port giving MAVLink heartbeat).
+    3. Candidate ports matching radio descriptors.
+    4. Any remaining candidate port excluding Pixhawk port.
     """
     env_port = os.getenv("GCS_RADIO_PORT")
     if env_port and env_port != "/dev/ttyUSB0" and os.path.exists(env_port):
         return env_port
 
     candidates = list_candidate_ports()
+    exclude_resolved = set()
     if exclude_port:
-        exclude_real = os.path.realpath(exclude_port)
-        candidates = [p for p in candidates if os.path.realpath(p) != exclude_real]
+        exclude_resolved.add(os.path.realpath(exclude_port))
+        exclude_resolved.add(exclude_port)
 
-    if not candidates:
+    # Filter out excluded ports
+    filtered_candidates = [
+        p for p in candidates
+        if p not in exclude_resolved and os.path.realpath(p) not in exclude_resolved
+    ]
+
+    if not filtered_candidates:
         return preferred_port or "/dev/ttyUSB0"
 
-    # Match descriptors
-    for p in candidates:
+    # Prioritize ports explicitly with "radio" or "sik" or non-Pixhawk indicators
+    radio_matches = []
+    other_candidates = []
+    for p in filtered_candidates:
         info = inspect_port_info(p)
-        if any(ident in info for ident in RADIO_IDENTIFIERS) or "ttyusb" in p.lower():
-            return p
+        # Avoid picking a CP2102/Pixhawk device as radio if there are other candidates
+        if any(ident in info for ident in ["sik", "radio", "3dr_radio", "ft232", "0403:"]):
+            radio_matches.append(p)
+        else:
+            other_candidates.append(p)
 
-    return preferred_port or candidates[0]
+    if radio_matches:
+        return radio_matches[0]
+
+    return other_candidates[0] if other_candidates else (preferred_port or filtered_candidates[0])
+

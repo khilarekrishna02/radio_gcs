@@ -135,25 +135,36 @@ def home():
 
 @app.get("/api/status")
 def status():
+    last_rx = bridge.last_rx
+    drone1_data = {
+        "radio_running": bridge.running,
+        "radio_port": bridge.port,
+        "radio_error": bridge_errors["drone1"],
+        "telemetry": bridge.telemetry,
+        "events": bridge.events[-15:],
+        "mission": mission_meta,
+        "port_open": bridge.port_open,
+        "link_age": (time.time() - last_rx) if last_rx else None,
+        "execute": execute_state
+    }
+    drone2_rx = drone2_bridge.last_rx
+    drone2_data = {
+        "radio_running": drone2_bridge.running,
+        "radio_port": drone2_bridge.port,
+        "radio_error": bridge_errors["drone2"],
+        "telemetry": drone2_bridge.telemetry,
+        "events": drone2_bridge.events[-15:],
+        "mission": drone2_mission_meta,
+        "port_open": drone2_bridge.port_open,
+        "link_age": (time.time() - drone2_rx) if drone2_rx else None,
+    }
+    # Return both top-level keys (for Drone 1 UI backward compatibility) and drone1/drone2 objects
     return jsonify({
-        "drone1": {
-            "radio_running": bridge.running, 
-            "radio_port": config.RADIO_PORT,
-            "radio_error": bridge_errors["drone1"], 
-            "telemetry": bridge.telemetry,
-            "events": bridge.events[-15:], 
-            "mission": mission_meta
-        },
-        "drone2": {
-                    "radio_running": drone2_bridge.running, 
-                    "radio_port": config.RADIO2_PORT,
-                    "radio_error": bridge_errors["drone2"], 
-                    "telemetry": drone2_bridge.telemetry,
-                    "events": drone2_bridge.events[-15:], 
-                    "mission": drone2_mission_meta
-                },
-
+        **drone1_data,
+        "drone1": drone1_data,
+        "drone2": drone2_data
     })
+
 
 @app.get("/api/ports")
 def ports():
