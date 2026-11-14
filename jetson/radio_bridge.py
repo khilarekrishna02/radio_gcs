@@ -8,6 +8,10 @@ import time
 import uuid
 import serial
 import config
+try:
+    from port_detector import detect_radio_port
+except ImportError:
+    detect_radio_port = None
 from protocol import encode_message, decode_message, parse_qgc_wpl
 
 
@@ -33,9 +37,18 @@ class RadioBridge:
         return bool(ser and ser.is_open)
 
     def _open_serial(self):
-        ser = serial.serial_for_url(config.RADIO_PORT, baudrate=config.RADIO_BAUD, timeout=0.25, write_timeout=3)
+        port = config.RADIO_PORT
+        if getattr(config, "AUTO_DETECT_PORTS", True) and detect_radio_port:
+            exclude = None
+            if self.pixhawk and getattr(self.pixhawk, "master", None):
+                exclude = getattr(self.pixhawk.master, "address", None)
+            detected = detect_radio_port(exclude_port=exclude, preferred_port=port)
+            if detected:
+                port = detected
+
+        ser = serial.serial_for_url(port, baudrate=config.RADIO_BAUD, timeout=0.25, write_timeout=3)
         self.serial = ser
-        print(f"[OK] Pi SiK radio opened on {config.RADIO_PORT} @ {config.RADIO_BAUD}")
+        print(f"[OK] Pi SiK radio opened on {port} @ {config.RADIO_BAUD}")
 
     def _drop_serial(self):
         ser, self.serial = self.serial, None

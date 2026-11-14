@@ -3,9 +3,14 @@ import time
 import uuid
 import serial
 from serial.tools import list_ports
-from config import RADIO_PORT, RADIO_BAUD, RADIO_TIMEOUT
+import config
 from protocol import encode_message, decode_message
 from request_manager import RequestManager
+try:
+    from port_detector import detect_radio_port
+except ImportError:
+    detect_radio_port = None
+
 
 
 class RadioBridge:
@@ -50,8 +55,14 @@ class RadioBridge:
             ser = self.serial
             if ser is None or not ser.is_open:
                 try:
-                    self.serial = serial.serial_for_url(self.port, baudrate=self.baud, timeout=0.25, write_timeout=3)
-                    self._log_event(f"Ground radio reopened on {self.port}")
+                    port = self.port
+                    if getattr(config, "AUTO_DETECT_PORTS", True) and detect_radio_port:
+                        detected = detect_radio_port(preferred_port=port)
+                        if detected:
+                            port = detected
+                            self.port = port
+                    self.serial = serial.serial_for_url(port, baudrate=self.baud, timeout=0.25, write_timeout=3)
+                    self._log_event(f"Ground radio reopened on {port}")
                 except Exception:
                     time.sleep(2)
                 continue

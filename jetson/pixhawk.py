@@ -4,6 +4,11 @@ import time
 from collections import deque
 from pymavlink import mavutil
 import config
+try:
+    from port_detector import detect_pixhawk_port
+except ImportError:
+    detect_pixhawk_port = None
+
 
 
 class PixhawkController:
@@ -30,6 +35,12 @@ class PixhawkController:
             return True
         port = config.PIXHAWK_PORT
         baud = config.PIXHAWK_BAUD
+
+        if config.PIXHAWK_CONNECTION_MODE != "udp" and getattr(config, "AUTO_DETECT_PORTS", True) and detect_pixhawk_port:
+            detected = detect_pixhawk_port(preferred_port=port, baud=baud)
+            if detected:
+                port = detected
+
         conn = None
         try:
             if config.PIXHAWK_CONNECTION_MODE == "udp":
