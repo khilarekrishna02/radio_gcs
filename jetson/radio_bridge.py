@@ -33,7 +33,7 @@ class RadioBridge:
         return bool(ser and ser.is_open)
 
     def _open_serial(self):
-        ser = serial.Serial(config.RADIO_PORT, config.RADIO_BAUD, timeout=0.25, write_timeout=3)
+        ser = serial.serial_for_url(config.RADIO_PORT, baudrate=config.RADIO_BAUD, timeout=0.25, write_timeout=3)
         self.serial = ser
         print(f"[OK] Pi SiK radio opened on {config.RADIO_PORT} @ {config.RADIO_BAUD}")
 

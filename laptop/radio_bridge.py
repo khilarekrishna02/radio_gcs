@@ -34,7 +34,7 @@ class RadioBridge:
     def start(self):
         if self.running:
             return
-        self.serial = serial.Serial(self.port, self.baud, timeout=0.25, write_timeout=3)
+        self.serial = serial.serial_for_url(self.port, baudrate=self.baud, timeout=0.25, write_timeout=3)
         self.running = True
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
@@ -50,7 +50,7 @@ class RadioBridge:
             ser = self.serial
             if ser is None or not ser.is_open:
                 try:
-                    self.serial = serial.Serial(self.port, self.baud, timeout=0.25, write_timeout=3)
+                    self.serial = serial.serial_for_url(self.port, baudrate=self.baud, timeout=0.25, write_timeout=3)
                     self._log_event(f"Ground radio reopened on {self.port}")
                 except Exception:
                     time.sleep(2)

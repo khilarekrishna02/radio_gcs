@@ -29,7 +29,7 @@ os.environ.setdefault("GCS_TELEMETRY_PERIOD", "1.0")
 if not os.path.isfile(os.path.join(JETSON, "protocol.py")):
     sys.exit("jetson/protocol.py is missing - the Jetson bridge needs the full protocol.py next to it")
 sys.path.insert(0, JETSON)
-import jetson.radio_bridge # noqa: E402  (the real Jetson bridge)
+import radio_bridge # noqa: E402  (the real Jetson bridge)
 
 HOME_LAT = float(os.getenv("FAKE_LAT", "18.5293"))
 HOME_LON = float(os.getenv("FAKE_LON", "73.8566"))
