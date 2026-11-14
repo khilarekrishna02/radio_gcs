@@ -28,6 +28,8 @@ class RadioBridge:
         self.events = []
         self.detected_targets = {}
         self.last_rx = None
+        self._rxbuf = bytearray()
+
 
     @property
     def port_open(self):
@@ -69,7 +71,7 @@ class RadioBridge:
                     time.sleep(2)
                 continue
             try:
-                line = ser.readline()
+                line = self._next_line(ser)
                 if not line:
                     continue
 
@@ -104,9 +106,27 @@ class RadioBridge:
                     time.sleep(1)
             except Exception as exc:
                 if self.running:
-                    self.events.append({"time": time.time(), "message": f"Radio receive error: {exc}"})
-                    self.events = self.events[-100:]
+                    self.bad_lines = getattr(self, "bad_lines", 0) + 1
+                    if time.time() - getattr(self, "_last_bad_log", 0) > 30:
+                        self._last_bad_log = time.time()
+                        self.events.append({"time": time.time(), "message": f"Ignored {self.bad_lines} unreadable radio line(s) so far (last: {exc})"})
+                        self.events = self.events[-100:]
 
+        def _next_line(self, ser):
+          """One complete line (ending in a newline), or b"" if none has arrived yet.
+        Bytes are collected across reads, so a line the radio delivers in pieces is not cut in half."""
+        chunk = ser.read(max(1, ser.in_waiting))
+        if chunk:
+            self._rxbuf.extend(chunk)
+        end = self._rxbuf.find(b"\n")
+        if end < 0:
+            if len(self._rxbuf) > 8192:          # runaway data with no newline: start over
+                self._rxbuf.clear()
+            return b""
+        line = bytes(self._rxbuf[:end + 1])
+        del self._rxbuf[:end + 1]
+        return line
+    
     def _write(self, raw):
         if not self.serial or not self.serial.is_open:
             raise RuntimeError("Ground radio is not open")

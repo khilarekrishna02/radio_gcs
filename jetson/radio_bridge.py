@@ -29,7 +29,8 @@ class RadioBridge:
         self.last_error = None
         self.events = []
         self.response_cache = {}
-        self.vision_thread = None   # set by surveillance_loop once the Geotagger exists
+        self.vision_thread = None 
+        self._rxbuf = bytearray()  # set by surveillance_loop once the Geotagger exists
 
     @property
     def port_open(self):
@@ -78,6 +79,24 @@ class RadioBridge:
         self.running.clear()
         self._drop_serial()
 
+
+    def _next_line(self, ser):
+
+
+        """One complete line (ending in a newline), or b"" if none has arrived yet.
+        Bytes are collected across reads, so a line the radio delivers in pieces is not cut in half."""
+        chunk = ser.read(max(1, ser.in_waiting))
+        if chunk:
+            self._rxbuf.extend(chunk)
+        end = self._rxbuf.find(b"\n")
+        if end < 0:
+            if len(self._rxbuf) > 8192:          # runaway data with no newline: start over
+                self._rxbuf.clear()
+            return b""
+        line = bytes(self._rxbuf[:end + 1])
+        del self._rxbuf[:end + 1]
+        return line
+    
     def send(self, message_type, payload=None, request_id=None):
         ser = self.serial
         if not ser or not ser.is_open:
@@ -129,7 +148,7 @@ class RadioBridge:
                     time.sleep(2)
                 continue
             try:
-                line = ser.readline()
+                line = self._next_line(ser)
                 if not line:
                     continue
 
