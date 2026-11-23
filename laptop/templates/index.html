@@ -66,6 +66,10 @@
         .btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
         
         .telemetry { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+        .telem-dual-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; }
+        .telem-col { background: #0c1727; border: 1px solid #22334c; border-radius: 14px; padding: 14px; }
+        .telem-col-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #1c2c43; }
+        .telem-col-title { font-weight: 750; font-size: 14px; display: flex; align-items: center; gap: 8px; }
         .metric { padding: 12px; border-radius: 12px; background: #0b1525; border: 1px solid #22334c; min-width: 0; }
         .metric .label { font-size: 11px; color: var(--muted); }
         .metric .value { font-size: 18px; font-weight: 750; margin-top: 4px; overflow-wrap: anywhere; }
@@ -97,6 +101,7 @@
             .grid { grid-template-columns: 1fr; }
             .wrap { padding: 18px 12px; }
             .panel { padding: 16px; }
+            .telem-dual-wrap { grid-template-columns: 1fr; }
         }
         @media (max-width: 430px) {
             .fields { grid-template-columns: 1fr; }
@@ -173,32 +178,66 @@
                 <div class="notice">Flight safety: verify the generated path, altitude, geofence, GPS lock, battery, and failsafes before flight. Test with propellers removed or in SITL first.</div>
             </section>
 
-            <!-- SECTION 02: LIVE TELEMETRY -->
-            <section class="panel">
+            <!-- SECTION 02: DUAL DRONE LIVE TELEMETRY (SIDE BY SIDE) -->
+            <section class="panel" style="grid-column: 1 / -1;">
                 <div class="section-head">
                     <div>
-                        <h2>02 / Live telemetry</h2>
-                        <div class="muted">Latest fields received from the Pi.</div>
+                        <h2>02 / Live Telemetry · Dual Drone Monitor</h2>
+                        <div class="muted">Live status, GPS position, and flight data for Scan Drone &amp; Delivery Drone.</div>
                     </div>
-                    <span class="pill" id="telemetry-age">NO DATA</span>
                 </div>
-                
-                <div class="telemetry">
-                    <div class="metric"><div class="label">LATITUDE</div><div class="value" id="lat">—</div></div>
-                    <div class="metric"><div class="label">LONGITUDE</div><div class="value" id="lon">—</div></div>
-                    <div class="metric"><div class="label">RELATIVE ALTITUDE</div><div class="value"><span id="alt">—</span> <span class="unit">m</span></div></div>
-                    <div class="metric"><div class="label">GROUND SPEED</div><div class="value"><span id="groundspeed">—</span> <span class="unit">m/s</span></div></div>
-                    <div class="metric"><div class="label">FLIGHT MODE</div><div class="value" id="mode">—</div></div>
-                    <div class="metric"><div class="label">ARM STATE</div><div class="value" id="armed">—</div></div>
-                    <div class="metric"><div class="label">LIDAR</div><div class="value"><span id="lidar_reading">—</span> <span class="unit">cm / driver units</span></div></div>
-                    <div class="metric"><div class="label">PIXHAWK STATUS</div><div class="value" id="status" style="font-size:13px">Waiting…</div></div>
+
+                <div class="telem-dual-wrap">
+                    <!-- DRONE 1: SCAN DRONE -->
+                    <div class="telem-col">
+                        <div class="telem-col-header">
+                            <div class="telem-col-title">
+                                <span class="dot" id="radio-dot"></span>
+                                <span>DRONE 1 · SCAN DRONE</span>
+                            </div>
+                            <span class="pill" id="telemetry-age">NO DATA</span>
+                        </div>
+                        <div class="telemetry">
+                            <div class="metric"><div class="label">LATITUDE</div><div class="value" id="lat">—</div></div>
+                            <div class="metric"><div class="label">LONGITUDE</div><div class="value" id="lon">—</div></div>
+                            <div class="metric"><div class="label">RELATIVE ALTITUDE</div><div class="value"><span id="alt">—</span> <span class="unit">m</span></div></div>
+                            <div class="metric"><div class="label">GROUND SPEED</div><div class="value"><span id="groundspeed">—</span> <span class="unit">m/s</span></div></div>
+                            <div class="metric"><div class="label">FLIGHT MODE</div><div class="value" id="mode">—</div></div>
+                            <div class="metric"><div class="label">ARM STATE</div><div class="value" id="armed">—</div></div>
+                            <div class="metric"><div class="label">LIDAR</div><div class="value"><span id="lidar_reading">—</span> <span class="unit">cm</span></div></div>
+                            <div class="metric"><div class="label">PIXHAWK STATUS</div><div class="value" id="status" style="font-size:13px">Waiting…</div></div>
+                        </div>
+                        <div class="statusline">
+                            <span class="dot" id="radio-dot-sub"></span>
+                            <span id="radio-status">Connecting to Scan Drone radio…</span>
+                        </div>
+                    </div>
+
+                    <!-- DRONE 2: DELIVERY DRONE -->
+                    <div class="telem-col">
+                        <div class="telem-col-header">
+                            <div class="telem-col-title">
+                                <span class="dot" id="d2-radio-dot"></span>
+                                <span>DRONE 2 · DELIVERY DRONE</span>
+                            </div>
+                            <span class="pill" id="drone2-link-pill">RADIO LINK · CHECKING</span>
+                        </div>
+                        <div class="telemetry">
+                            <div class="metric"><div class="label">LATITUDE</div><div class="value" id="d2-lat">—</div></div>
+                            <div class="metric"><div class="label">LONGITUDE</div><div class="value" id="d2-lon">—</div></div>
+                            <div class="metric"><div class="label">ALTITUDE</div><div class="value"><span id="d2-alt">—</span> <span class="unit">m</span></div></div>
+                            <div class="metric"><div class="label">FLIGHT MODE</div><div class="value" id="d2-mode">—</div></div>
+                            <div class="metric"><div class="label">ARM STATE</div><div class="value" id="d2-armed">—</div></div>
+                            <div class="metric"><div class="label">PIXHAWK STATUS</div><div class="value" id="d2-status" style="font-size:13px">Waiting…</div></div>
+                        </div>
+                        <div class="statusline">
+                            <span class="dot" id="d2-radio-dot-sub"></span>
+                            <span id="d2-radio-status">Waiting for Delivery Drone radio…</span>
+                        </div>
+                    </div>
                 </div>
-                
-                <div class="statusline">
-                    <span class="dot" id="radio-dot"></span>
-                    <span id="radio-status">Connecting to ground radio…</span>
-                </div>
-                <div class="log" id="event-log">System events will appear here.</div>
+
+                <div class="log" id="event-log" style="margin-top: 14px;">System events will appear here.</div>
             </section>
 
             <!-- SECTION 03: TACTICAL MAP -->
@@ -385,20 +424,6 @@
                     <a class="btn" id="drone2-download-btn" href="/api/drone2/download-mission" style="display:none;text-decoration:none;">Download Mission</a>
                 </div>
                 <div class="statusline"><span id="drone2-summary">No Drone 2 mission generated.</span></div>
-
-                <h3>Drone 2 Telemetry</h3>
-                <div class="telemetry">
-                    <div class="metric"><div class="label">LATITUDE</div><div class="value" id="d2-lat">—</div></div>
-                    <div class="metric"><div class="label">LONGITUDE</div><div class="value" id="d2-lon">—</div></div>
-                    <div class="metric"><div class="label">ALTITUDE</div><div class="value"><span id="d2-alt">—</span> <span class="unit">m</span></div></div>
-                    <div class="metric"><div class="label">FLIGHT MODE</div><div class="value" id="d2-mode">—</div></div>
-                    <div class="metric"><div class="label">ARM STATE</div><div class="value" id="d2-armed">—</div></div>
-                    <div class="metric"><div class="label">PIXHAWK STATUS</div><div class="value" id="d2-status">Waiting…</div></div>
-                </div>
-                <div class="statusline">
-                    <span class="dot" id="d2-radio-dot"></span>
-                    <span id="d2-radio-status">Waiting for Drone 2 radio…</span>
-                </div>
 
                 <h3>Mission Execution</h3>
                 <div class="workflow">
@@ -636,11 +661,14 @@
                 const portOpen = d.port_open ?? d.radio_running;
                 const droneAlive = d.link_age !== null && d.link_age !== undefined && d.link_age < 6;
                 linkAlive = !!(portOpen && droneAlive);
-                $('radio-status').textContent = !portOpen
+                const rMsg = !portOpen
                     ? (d.radio_error || 'Ground radio not connected — retrying…')
                     : (droneAlive ? `Ground radio open · ${d.radio_port} · drone link alive`
                                   : `Ground radio open · ${d.radio_port} · waiting for drone…`);
-                $('radio-dot').className = 'dot ' + (linkAlive ? 'ok' : 'bad');
+                $('radio-status').textContent = rMsg;
+                const d1DotClass = 'dot ' + (linkAlive ? 'ok' : 'bad');
+                $('radio-dot').className = d1DotClass;
+                if ($('radio-dot-sub')) $('radio-dot-sub').className = d1DotClass;
                 $('link-pill').textContent = linkAlive ? 'DRONE LINK · ALIVE' : (portOpen ? 'RADIO OPEN · NO DRONE' : 'RADIO LINK · OFFLINE');
                 updateButtons();
                 
@@ -657,7 +685,9 @@
                 $('d2-radio-status').textContent = d2.radio_running
                     ? `Ground radio open · ${d2.radio_port}`
                     : (d2.radio_error || 'Radio disconnected');
-                $('d2-radio-dot').className = 'dot ' + (d2.radio_running ? 'ok' : 'bad');
+                const d2DotClass = 'dot ' + (d2.radio_running ? 'ok' : 'bad');
+                $('d2-radio-dot').className = d2DotClass;
+                if ($('d2-radio-dot-sub')) $('d2-radio-dot-sub').className = d2DotClass;
                 $('drone2-link-pill').textContent = d2.radio_running ? 'RADIO LINK · OPEN' : 'RADIO LINK · OFFLINE';
 
                 if (typeof updateDistances === 'function') updateDistances();
