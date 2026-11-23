@@ -89,3 +89,115 @@ def detect_radio_port(exclude_ports=None, preferred_port=None):
 
     # 2. Return first available candidate
     return candidates[0]
+
+
+def wait_for_new_port(known_ports, timeout=None, poll_interval=1.0):
+    """
+    Watches for a new serial port to appear that is not in known_ports.
+    OS-independent: works on Windows, Linux, and macOS.
+    Returns the new port path/name or None if timed out.
+    """
+    import time
+    known_resolved = {os.path.realpath(p) for p in known_ports if p}
+    start_time = time.time()
+
+    while True:
+        current_candidates = list_candidate_ports()
+        for p in current_candidates:
+            if os.path.realpath(p) not in known_resolved:
+                return p
+        if timeout is not None and (time.time() - start_time) >= timeout:
+            return None
+        time.sleep(poll_interval)
+
+
+def prompt_assign_drone(port_name):
+    """
+    Prompts the user to assign a detected port to Scan (Drone 1) or Delivery (Drone 2).
+    Returns 'scan' or 'del'.
+    """
+    while True:
+        try:
+            choice = input(f"\n[RADIO DETECTED] Port '{port_name}' detected.\nAssign to Scan drone (s) or Delivery drone (d)? [s/d]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAssignment cancelled or input unavailable. Defaulting to Scan.")
+            return "scan"
+        if choice in ("s", "scan", "1"):
+            return "scan"
+        elif choice in ("d", "del", "delivery", "2"):
+            return "del"
+        print("Invalid choice. Please enter 's' for Scan or 'd' for Delivery.")
+
+
+def setup_radio_ports_interactive():
+    """
+    Interactive and dynamic device detection for Drone 1 (Scan) and Drone 2 (Delivery).
+    Returns a tuple: (scan_port, del_port)
+    """
+    print("\n" + "=" * 60)
+    print("        GCS DUAL-DRONE RADIO PORT CONFIGURATION")
+    print("=" * 60)
+
+    initial_ports = list_candidate_ports()
+    scan_port = None
+    del_port = None
+
+    if len(initial_ports) == 0:
+        print("[INFO] No telemetry radios detected yet.")
+        print("[ACTION] Please insert the FIRST telemetry radio (Scan or Delivery)...")
+        first_port = wait_for_new_port(known_ports=[])
+        role = prompt_assign_drone(first_port)
+        if role == "scan":
+            scan_port = first_port
+            print(f"[OK] Assigned {first_port} -> SCAN DRONE (Drone 1)")
+            print("\n[ACTION] Please insert the SECOND telemetry radio for DELIVERY DRONE...")
+            second_port = wait_for_new_port(known_ports=[scan_port])
+            del_port = second_port
+            print(f"[OK] Assigned {second_port} -> DELIVERY DRONE (Drone 2)")
+        else:
+            del_port = first_port
+            print(f"[OK] Assigned {first_port} -> DELIVERY DRONE (Drone 2)")
+            print("\n[ACTION] Please insert the SECOND telemetry radio for SCAN DRONE...")
+            second_port = wait_for_new_port(known_ports=[del_port])
+            scan_port = second_port
+            print(f"[OK] Assigned {second_port} -> SCAN DRONE (Drone 1)")
+
+    elif len(initial_ports) == 1:
+        first_port = initial_ports[0]
+        role = prompt_assign_drone(first_port)
+        if role == "scan":
+            scan_port = first_port
+            print(f"[OK] Assigned {first_port} -> SCAN DRONE (Drone 1)")
+            print("\n[ACTION] Please insert the SECOND telemetry radio for DELIVERY DRONE...")
+            second_port = wait_for_new_port(known_ports=[scan_port])
+            del_port = second_port
+            print(f"[OK] Assigned {second_port} -> DELIVERY DRONE (Drone 2)")
+        else:
+            del_port = first_port
+            print(f"[OK] Assigned {first_port} -> DELIVERY DRONE (Drone 2)")
+            print("\n[ACTION] Please insert the SECOND telemetry radio for SCAN DRONE...")
+            second_port = wait_for_new_port(known_ports=[del_port])
+            scan_port = second_port
+            print(f"[OK] Assigned {second_port} -> SCAN DRONE (Drone 1)")
+
+    else:
+        # Two or more devices already plugged in
+        print(f"[INFO] Multiple candidate ports detected: {initial_ports}")
+        first_port = initial_ports[0]
+        role = prompt_assign_drone(first_port)
+        if role == "scan":
+            scan_port = first_port
+            del_port = initial_ports[1]
+            print(f"[OK] Assigned {scan_port} -> SCAN DRONE (Drone 1)")
+            print(f"[OK] Assigned {del_port} -> DELIVERY DRONE (Drone 2)")
+        else:
+            del_port = first_port
+            scan_port = initial_ports[1]
+            print(f"[OK] Assigned {del_port} -> DELIVERY DRONE (Drone 2)")
+            print(f"[OK] Assigned {scan_port} -> SCAN DRONE (Drone 1)")
+
+    print("=" * 60)
+    print(f"Configured Ports -> Scan Drone: {scan_port} | Delivery Drone: {del_port}")
+    print("=" * 60 + "\n")
+    return scan_port, del_port
+

@@ -7,9 +7,10 @@ import threading
 from flask import Flask, jsonify, render_template, request, send_file
 import config
 try:
-    from port_detector import detect_radio_port
+    from port_detector import detect_radio_port, setup_radio_ports_interactive
 except ImportError:
     detect_radio_port = None
+    setup_radio_ports_interactive = None
 from mission_planner import parse_kml_polygon, generate_reference_serpentine
 from radio_bridge import RadioBridge, list_serial_ports
 from route_optimizer import (
@@ -20,26 +21,19 @@ from route_optimizer import (
 
 app = Flask(__name__, template_folder="templates")
 
-# Resolve auto-detected ports for bridges
+# Resolve ports for bridges (interactive dynamic detection runs in __main__)
 r1_port = config.RADIO_PORT
 r2_port = config.RADIO2_PORT
-if getattr(config, "AUTO_DETECT_PORTS", True) and detect_radio_port:
-    d1 = detect_radio_port(preferred_port=r1_port)
-    if d1:
-        r1_port = d1
-    d2 = detect_radio_port(exclude_ports=[r1_port], preferred_port=r2_port)
-    if d2:
-        r2_port = d2
 
 bridge = RadioBridge(
     r1_port,
     config.RADIO_BAUD
-)                                  # bridge for drone 1
+)                                  # bridge for drone 1 (Scan)
 
 drone2_bridge = RadioBridge(
     r2_port,
     config.RADIO2_BAUD
-)                                  # bridge for drone 2
+)                                  # bridge for drone 2 (Delivery)
 
 bridge_errors = {
     "drone1": None,
@@ -678,11 +672,16 @@ def execute_status():
 
 
 def _radio_supervisor():
-    """Opens the ground radio as soon as it is plugged in (the bridge itself handles re-plugs)."""
+    """Opens ground radios as soon as they are assigned and plugged in (bridge handles reconnects)."""
     while True:
-        if not bridge.running:
+        if bridge.port and not bridge.running:
             try:
                 ensure_radio(bridge, "drone1")
+            except Exception:
+                pass
+        if drone2_bridge.port and not drone2_bridge.running:
+            try:
+                ensure_radio(drone2_bridge, "drone2")
             except Exception:
                 pass
         time.sleep(3)
@@ -690,11 +689,28 @@ def _radio_supervisor():
 
 if __name__ == "__main__":
     os.makedirs(config.MISSION_DIR, exist_ok=True)
+
+    if getattr(config, "AUTO_DETECT_PORTS", True) and setup_radio_ports_interactive:
+        p_scan, p_del = setup_radio_ports_interactive()
+        if p_scan:
+            bridge.port = p_scan
+        if p_del:
+            drone2_bridge.port = p_del
+
     try:
-        ensure_radio(bridge, "drone1")
+        if bridge.port:
+            ensure_radio(bridge, "drone1")
     except Exception as exc:
-        print(f"[WARN] {exc}. Web UI will start; the radio will be opened automatically once it is plugged in.")
+        print(f"[WARN] Scan drone radio ({bridge.port}): {exc}")
+
+    try:
+        if drone2_bridge.port:
+            ensure_radio(drone2_bridge, "drone2")
+    except Exception as exc:
+        print(f"[WARN] Delivery drone radio ({drone2_bridge.port}): {exc}")
+
     threading.Thread(target=_radio_supervisor, daemon=True, name="radio-supervisor").start()
+    print(f"[GCS] Starting web server on http://{config.WEB_HOST}:{config.WEB_PORT}")
     app.run(host=config.WEB_HOST, 
             port=config.WEB_PORT, 
             debug=False, 

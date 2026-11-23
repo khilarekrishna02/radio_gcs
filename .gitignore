@@ -1,30 +1,78 @@
-# Python cache files
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
 
-# Python virtual environments
+# C / build artifacts
+*.o
+*.obj
+*.exe
+*.out
+*.app
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
 venv/
 .venv/
 env/
+ENV/
+env.bak/
+venv.bak/
 
-# Environment variables and secrets
+# Environment variables & secrets
 .env
 .env.*
+!.env.example
 
-# Test and tooling caches
+# Unit test / coverage / tooling caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
 
-# IDE files
+# IDE & Editor files
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 
-*.pt 
-*.csv
+# Large weights and model artifacts
+*.pt
+*.pth
+*.onnx
+*.engine
+*.tflite
+models/best/data*
 
-./models/best/data*
-./laptop/__pycache__*
-./jetson/__pycache__*
-./drone2_obc/__pycache__*
+# Runtime / log files
+*.log
+*.log.*
+final_locations_per_track.csv
